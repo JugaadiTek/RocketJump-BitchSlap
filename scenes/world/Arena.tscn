@@ -1,0 +1,42 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/world/Arena.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/world/OrbitalBody.tscn" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/player/Player.tscn" id="3"]
+[ext_resource type="PackedScene" path="res://scenes/npc/Bot.tscn" id="4"]
+[ext_resource type="PackedScene" path="res://scenes/weapons/PlanetBusterPickup.tscn" id="5"]
+[ext_resource type="Environment" path="res://scenes/world/default_environment.tres" id="6"]
+
+[node name="Arena" type="Node3D"]
+script = ExtResource("1")
+orbital_body_scene = ExtResource("2")
+player_scene = ExtResource("3")
+bot_scene = ExtResource("4")
+bot_count = 3
+planet_buster_pickup_scene = ExtResource("5")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = ExtResource("6")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.7, -0.5, 0.5, 0, 0.7, 0.7, -0.7, -0.5, 0.5, 0, 200, 0)
+light_energy = 1.3
+shadow_enabled = true
+
+[node name="OrbitCenter" type="Marker3D" parent="."]
+
+[node name="OrbitalBodies" type="Node3D" parent="."]
+
+[node name="SpawnPoints" type="Node3D" parent="."]
+
+[node name="Players" type="Node3D" parent="."]
+
+[node name="PlayerSpawner" type="MultiplayerSpawner" parent="."]
+_spawnable_scenes = PackedStringArray("res://scenes/player/Player.tscn")
+spawn_path = NodePath("../Players")
+
+[node name="Bots" type="Node3D" parent="."]
+
+[node name="BotSpawner" type="MultiplayerSpawner" parent="."]
+_spawnable_scenes = PackedStringArray("res://scenes/npc/Bot.tscn")
+spawn_path = NodePath("../Bots")

@@ -13,19 +13,19 @@ A Standard First Person Shooter Player Controller inspired by Quake 3 Arenas Fee
 
 ### Weapons
 - A Rocket Launcher the launches slow moving projectiles
-    - No Self Damage and a rocket jump mechanic.
-        - Can use rocket jumps to navigate between different orbs, or when not touching a planet/orb to change the direction of movement.
-    - Rockets hitting planets change their orbits by 0.01% to 0.1% to create a gradual chaotic shift to the arena and emergent gameplay opertunities.
+	- No Self Damage and a rocket jump mechanic.
+		- Can use rocket jumps to navigate between different orbs, or when not touching a planet/orb to change the direction of movement.
+	- Rockets hitting planets change their orbits by 0.01% to 0.1% to create a gradual chaotic shift to the arena and emergent gameplay opertunities.
 - Mele Attack: "The Bitchslap" -> grab a player in range, smack their face, then a piston attached to the player slams into them killing them and sending their body flying away.
-    - If smacked downward: it sends the player launching into orbit.
-    - If Smacked outwards & the defeated enemies body hits another planet orb, it changes its orbit appropriately.
+	- If smacked downward: it sends the player launching into orbit.
+	- If Smacked outwards & the defeated enemies body hits another planet orb, it changes its orbit appropriately.
 - **Rail Gun:** that uses a raycast to instantly determine hits.
 - **Slug Gun:** A slug launcher weapon that launches alien slugs which ooze along the surface of the plaents to chase down other players.
 - **The Planet Buster:** A slow moving Weapon that spawns rarely and can be used to break the orb planets apart and kill everyone within a certain radius.
-    - Single shot, the whole weapon is literally a hand held missile without a launcher. It is a one shot weapon that can be used to destroy planets and kill everyone on them.
+	- Single shot, the whole weapon is literally a hand held missile without a launcher. It is a one shot weapon that can be used to destroy planets and kill everyone on them.
 - **Portal Gun:** 
-    - Can be used to create a portal on a planet surface and another portal on another planet surface to create a wormhole between the two planets.
-    - Players can use this to quickly navigate between planets or to escape from enemies. 
+	- Can be used to create a portal on a planet surface and another portal on another planet surface to create a wormhole between the two planets.
+	- Players can use this to quickly navigate between planets or to escape from enemies. 
 
 ## **Game Features:**
 - A Starter Arena with 2 orbiting spheres in the center and several other spheres orbiting the central two. The smallest sphere a players should be able to run around it in any direction in less than 15 seconds, the largest sphere should take 2 minutes to run around the surface.

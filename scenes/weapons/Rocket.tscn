@@ -1,0 +1,38 @@
+[gd_scene format=3 uid="uid://cxwgnrjyyt2ib"]
+
+[ext_resource type="Script" uid="uid://cpcos3uilh73o" path="res://scripts/weapons/Rocket.gd" id="1"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_1"]
+radius = 0.12
+height = 0.5
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_1"]
+top_radius = 0.1
+bottom_radius = 0.13
+height = 0.45
+radial_segments = 10
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_1"]
+albedo_color = Color(0.9, 0.35, 0.1, 1)
+emission_enabled = true
+emission = Color(1, 0.4, 0.1, 1)
+emission_energy_multiplier = 2.5
+
+[node name="Rocket" type="CharacterBody3D" unique_id=319372419]
+collision_layer = 4
+collision_mask = 11
+script = ExtResource("1")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1068061630]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0, 0)
+shape = SubResource("CapsuleShape3D_1")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=1151809521]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0, 0)
+mesh = SubResource("CylinderMesh_1")
+surface_material_override/0 = SubResource("StandardMaterial3D_1")
+
+[node name="OmniLight3D" type="OmniLight3D" parent="." unique_id=1485451478]
+light_color = Color(1, 0.5, 0.2, 1)
+light_energy = 2.0
+omni_range = 4.0

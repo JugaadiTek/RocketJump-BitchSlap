@@ -1,0 +1,8 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/weapons/RocketLauncher.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/weapons/Rocket.tscn" id="2"]
+
+[node name="RocketLauncher" type="Node3D"]
+script = ExtResource("1")
+rocket_scene = ExtResource("2")
