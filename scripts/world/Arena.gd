@@ -1,45 +1,73 @@
 extends Node3D
-## Builds the starter arena: a central binary pair plus four smaller orbs
-## sweeping around them at different radii/speeds. Bodies are instanced from
-## a single OrbitalBody.tscn template rather than hand-placed, so tuning a
-## planet is a one-line data change instead of editing a scene tree.
+## Builds the starter arena: a central binary pair, four satellite planets
+## swept out around them at varied radii/speeds/orbital-plane tilts, and a
+## moon orbiting three of those satellites (their `orbit_pivot` points at the
+## parent planet's OrbitalBody instead of the shared center, so a moon's
+## position naturally follows its parent as the parent itself circles the
+## binary - see `_build_orbital_bodies()`).
 ##
-## Sizing note: with Player.max_ground_speed = 9 m/s, a circumference of
-## ~135m takes ~15s to run around and ~1080m takes ~120s - that's where
-## Luna's and Titan's radii below come from (radius = circumference / 2*PI).
+## Bodies are instanced from a single OrbitalBody.tscn template rather than
+## hand-placed, so tuning a planet is a one-line data change instead of
+## editing a scene tree.
 
 const ORBIT_DATA: Array[Dictionary] = [
 	# The central binary - always present, never shatterable.
 	{
-		"name": "Alpha", "radius": 45.0, "surface_gravity": 22.0,
-		"orbit_radius": 70.0, "orbit_speed": 0.05, "start_angle": 0.0,
-		"can_be_shattered": false, "color": Color(0.55, 0.48, 0.42),
+		"name": "Alpha", "radius": 28.0, "surface_gravity": 20.0,
+		"orbit_radius": 48.0, "orbit_speed": 0.045, "start_angle": 0.0,
+		"can_be_shattered": false, "color": Color(0.85, 0.65, 0.25),
 	},
 	{
-		"name": "Beta", "radius": 35.0, "surface_gravity": 19.0,
-		"orbit_radius": 55.0, "orbit_speed": 0.05, "start_angle": PI,
-		"can_be_shattered": false, "color": Color(0.42, 0.46, 0.55),
+		"name": "Beta", "radius": 19.0, "surface_gravity": 16.0,
+		"orbit_radius": 36.0, "orbit_speed": 0.045, "start_angle": PI,
+		"can_be_shattered": false, "color": Color(0.35, 0.55, 0.85),
 	},
-	# Outer orbs - shatterable by the Planet Buster.
+	# Satellite planets - shatterable, spread far out at different orbital
+	# radii and tilted orbital planes so they don't all sweep through the
+	# same flat disc.
 	{
-		"name": "Luna", "radius": 21.0, "surface_gravity": 14.0,
-		"orbit_radius": 200.0, "orbit_speed": 0.026, "start_angle": 0.6,
-		"can_be_shattered": true, "color": Color(0.6, 0.6, 0.62),
-	},
-	{
-		"name": "Ceres", "radius": 60.0, "surface_gravity": 20.0,
-		"orbit_radius": 320.0, "orbit_speed": 0.015, "start_angle": 2.4,
-		"can_be_shattered": true, "color": Color(0.5, 0.35, 0.25),
+		"name": "Ferrum", "radius": 15.0, "surface_gravity": 13.0,
+		"orbit_radius": 230.0, "orbit_speed": 0.021, "start_angle": 0.4,
+		"orbit_axis": Vector3(0.18, 1.0, 0.05), "can_be_shattered": true,
+		"color": Color(0.75, 0.3, 0.15),
 	},
 	{
-		"name": "Vesta", "radius": 90.0, "surface_gravity": 23.0,
-		"orbit_radius": 430.0, "orbit_speed": 0.010, "start_angle": 4.1,
-		"can_be_shattered": true, "color": Color(0.35, 0.5, 0.4),
+		"name": "Verdant", "radius": 33.0, "surface_gravity": 21.0,
+		"orbit_radius": 360.0, "orbit_speed": 0.014, "start_angle": 2.6,
+		"orbit_axis": Vector3(-0.22, 1.0, 0.12), "can_be_shattered": true,
+		"color": Color(0.25, 0.7, 0.35),
 	},
 	{
-		"name": "Titan", "radius": 172.0, "surface_gravity": 26.0,
-		"orbit_radius": 620.0, "orbit_speed": 0.006, "start_angle": 1.3,
-		"can_be_shattered": true, "color": Color(0.45, 0.4, 0.55),
+		"name": "Cobalt", "radius": 9.0, "surface_gravity": 10.0,
+		"orbit_radius": 480.0, "orbit_speed": 0.010, "start_angle": 4.4,
+		"orbit_axis": Vector3(0.05, 1.0, -0.28), "can_be_shattered": true,
+		"color": Color(0.2, 0.55, 0.8),
+	},
+	{
+		"name": "Umbra", "radius": 24.0, "surface_gravity": 18.0,
+		"orbit_radius": 610.0, "orbit_speed": 0.007, "start_angle": 1.5,
+		"orbit_axis": Vector3(-0.12, 1.0, -0.2), "can_be_shattered": true,
+		"color": Color(0.6, 0.3, 0.75),
+	},
+	# Moons - orbit_pivot resolves to their parent's OrbitalBody at build
+	# time, so they travel with it instead of around the arena center.
+	{
+		"name": "Ferrum_Moon", "radius": 4.0, "surface_gravity": 6.0,
+		"orbit_radius": 32.0, "orbit_speed": 0.13, "start_angle": 0.0,
+		"orbit_axis": Vector3(0.1, 1.0, 0.3), "can_be_shattered": true,
+		"color": Color(0.8, 0.55, 0.4), "parent": "Ferrum",
+	},
+	{
+		"name": "Verdant_Moon", "radius": 6.0, "surface_gravity": 7.0,
+		"orbit_radius": 56.0, "orbit_speed": 0.09, "start_angle": 1.8,
+		"orbit_axis": Vector3(-0.15, 1.0, 0.05), "can_be_shattered": true,
+		"color": Color(0.55, 0.8, 0.6), "parent": "Verdant",
+	},
+	{
+		"name": "Umbra_Moon", "radius": 3.5, "surface_gravity": 5.0,
+		"orbit_radius": 42.0, "orbit_speed": 0.15, "start_angle": 3.5,
+		"orbit_axis": Vector3(0.2, 1.0, -0.1), "can_be_shattered": true,
+		"color": Color(0.75, 0.6, 0.85), "parent": "Umbra",
 	},
 ]
 
@@ -50,7 +78,7 @@ const SPAWNS_PER_BODY: int = 3
 @export var bot_scene: PackedScene
 @export var bot_count: int = 3
 @export var planet_buster_pickup_scene: PackedScene
-@export var planet_buster_pad_bodies: Array[String] = ["Ceres", "Vesta"]
+@export var planet_buster_pad_bodies: Array[String] = ["Verdant", "Umbra"]
 
 @onready var orbit_center: Node3D = $OrbitCenter
 @onready var orbital_bodies_container: Node3D = $OrbitalBodies
@@ -77,16 +105,20 @@ func _ready() -> void:
 		_spawn_bots()
 
 func _build_orbital_bodies() -> void:
+	# ORBIT_DATA lists every moon after its parent planet, so by the time we
+	# reach a "parent" entry, _bodies_by_name already has that planet's node.
 	for data in ORBIT_DATA:
 		var body: OrbitalBody = orbital_body_scene.instantiate()
 		orbital_bodies_container.add_child(body)
 		body.name = data["name"]
 		body.radius = data["radius"]
 		body.surface_gravity = data["surface_gravity"]
-		body.influence_radius = data["radius"] * 3.0
-		body.orbit_pivot = orbit_center
+		body.influence_radius = data["radius"] * 3.5
+		var parent_name: String = data.get("parent", "")
+		body.orbit_pivot = _bodies_by_name[parent_name] if parent_name != "" else orbit_center
 		body.orbit_radius = data["orbit_radius"]
 		body.orbit_speed = data["orbit_speed"]
+		body.orbit_axis = (data.get("orbit_axis", Vector3.UP) as Vector3).normalized()
 		body.orbit_start_angle = data["start_angle"]
 		body.can_be_shattered = data["can_be_shattered"]
 		body.spin_speed = randf_range(0.02, 0.08) * (1.0 if randf() < 0.5 else -1.0)

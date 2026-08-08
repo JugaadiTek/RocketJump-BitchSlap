@@ -8,6 +8,7 @@ func _init() -> void:
 	weapon_name = "Railgun"
 	fire_cooldown = 1.4
 	damage = 80.0
+	weapon_color = Color(0.4, 0.9, 1.0)
 
 func _do_fire(muzzle_transform: Transform3D, aim_direction: Vector3) -> void:
 	var space_state := get_world_3d().direct_space_state

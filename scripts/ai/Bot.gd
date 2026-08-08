@@ -179,8 +179,14 @@ func _wants_jump() -> bool:
 func _wants_fire() -> bool:
 	return _ai_wants_fire
 
+func _wants_aim() -> bool:
+	return false # bots don't ADS in this starter version
+
 func _wants_melee() -> bool:
 	return _ai_wants_melee
 
 func _get_weapon_switch() -> int:
 	return _ai_weapon_index
+
+func _get_weapon_scroll() -> int:
+	return 0 # bots pick weapons directly via _get_weapon_switch instead

@@ -1,6 +1,22 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/weapons/Railgun.gd" id="1"]
 
+[sub_resource type="BoxMesh" id="BoxMesh_body"]
+size = Vector3(0.09, 0.09, 0.58)
+
+[sub_resource type="BoxMesh" id="BoxMesh_stock"]
+size = Vector3(0.11, 0.12, 0.16)
+
 [node name="Railgun" type="Node3D"]
 script = ExtResource("1")
+
+[node name="ViewModel" type="Node3D" parent="."]
+
+[node name="Body" type="MeshInstance3D" parent="ViewModel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.04, -0.14, -0.4)
+mesh = SubResource("BoxMesh_body")
+
+[node name="Stock" type="MeshInstance3D" parent="ViewModel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.04, -0.14, -0.04)
+mesh = SubResource("BoxMesh_stock")

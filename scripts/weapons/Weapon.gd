@@ -12,9 +12,31 @@ signal fired
 ## If true, this weapon is removed from the loadout after a single shot
 ## (used by the Planet Buster, which is pickup-only and rare by design).
 @export var consumed_on_fire: bool = false
+## Identity color for this weapon - tints its first-person viewmodel meshes
+## (any MeshInstance3D under a child node named "ViewModel") and is read by
+## the HUD to color-code the weapon list. Set per-subclass in `_init()`.
+@export var weapon_color: Color = Color.WHITE
 
 var owner_player: Node = null
 var _cooldown_remaining: float = 0.0
+
+func _ready() -> void:
+	_apply_weapon_color()
+
+func _apply_weapon_color() -> void:
+	var view_model: Node = get_node_or_null("ViewModel")
+	if view_model == null:
+		return
+	for child in view_model.get_children():
+		if child is MeshInstance3D:
+			var mat := StandardMaterial3D.new()
+			mat.albedo_color = weapon_color
+			mat.emission_enabled = true
+			mat.emission = weapon_color
+			mat.emission_energy_multiplier = 1.4
+			mat.metallic = 0.3
+			mat.roughness = 0.5
+			child.material_override = mat
 
 func _process(delta: float) -> void:
 	if _cooldown_remaining > 0.0:

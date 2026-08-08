@@ -7,6 +7,7 @@ extends Weapon
 func _init() -> void:
 	weapon_name = "Rocket Launcher"
 	fire_cooldown = 0.9
+	weapon_color = Color(0.95, 0.4, 0.1)
 
 func _do_fire(muzzle_transform: Transform3D, aim_direction: Vector3) -> void:
 	if rocket_scene == null:

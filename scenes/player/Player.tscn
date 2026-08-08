@@ -40,9 +40,10 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6, 0)
 fov = 88.0
 
 [node name="Muzzle" type="Marker3D" parent="Head/Camera3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.25, -0.2, -0.6)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.32, -0.34, -1.1)
 
-[node name="WeaponManager" type="Node" parent="."]
+[node name="WeaponManager" type="Node3D" parent="Head/Camera3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.32, -0.28, -0.5)
 script = ExtResource("2")
 rocket_launcher_scene = ExtResource("4")
 railgun_scene = ExtResource("5")

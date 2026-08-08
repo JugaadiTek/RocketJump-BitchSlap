@@ -1,8 +1,27 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/weapons/SlugLauncher.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/weapons/Slug.tscn" id="2"]
 
+[sub_resource type="CylinderMesh" id="CylinderMesh_body"]
+top_radius = 0.095
+bottom_radius = 0.11
+height = 0.32
+radial_segments = 10
+
+[sub_resource type="BoxMesh" id="BoxMesh_grip"]
+size = Vector3(0.11, 0.16, 0.13)
+
 [node name="SlugLauncher" type="Node3D"]
 script = ExtResource("1")
 slug_scene = ExtResource("2")
+
+[node name="ViewModel" type="Node3D" parent="."]
+
+[node name="Body" type="MeshInstance3D" parent="ViewModel"]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, -0.1, -0.28)
+mesh = SubResource("CylinderMesh_body")
+
+[node name="Grip" type="MeshInstance3D" parent="ViewModel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.19, -0.06)
+mesh = SubResource("BoxMesh_grip")

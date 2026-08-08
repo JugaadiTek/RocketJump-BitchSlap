@@ -7,6 +7,7 @@ extends Weapon
 func _init() -> void:
 	weapon_name = "Slug Launcher"
 	fire_cooldown = 1.1
+	weapon_color = Color(0.3, 0.85, 0.35)
 
 func _do_fire(muzzle_transform: Transform3D, aim_direction: Vector3) -> void:
 	if slug_scene == null:

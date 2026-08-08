@@ -25,6 +25,12 @@ extends CharacterBody3D
 @export var mouse_sensitivity: float = 0.0025
 @export var pitch_limit_degrees: float = 89.0
 
+@export_group("Aim (ADS)")
+@export var hipfire_fov_degrees: float = 88.0
+@export var ads_fov_degrees: float = 45.0
+@export var ads_sensitivity_multiplier: float = 0.45
+@export var ads_transition_speed: float = 12.0 ## higher = snappier zoom in/out
+
 @export_group("Health")
 @export var max_health: float = 100.0
 @export var respawn_delay: float = 3.0
@@ -32,6 +38,7 @@ extends CharacterBody3D
 ## ---- Runtime state -----------------------------------------------------
 var health: float = 100.0
 var is_dead: bool = false
+var is_aiming: bool = false
 var current_gravity: Vector3 = Vector3.ZERO
 var last_damage_instigator_path: NodePath
 
@@ -43,11 +50,13 @@ var _default_collision_mask: int
 @onready var head: Node3D = $Head
 @onready var camera: Camera3D = $Head/Camera3D
 @onready var muzzle: Marker3D = $Head/Camera3D/Muzzle
-@onready var weapon_manager: Node = $WeaponManager
+@onready var weapon_manager: Node3D = $Head/Camera3D/WeaponManager
 @onready var melee: Node = $Melee
 @onready var collision_shape: CollisionShape3D = $CollisionShape3D
 @onready var model: Node3D = $Model
 @onready var sync: MultiplayerSynchronizer = $MultiplayerSynchronizer
+
+var hud: CanvasLayer = null
 
 func _ready() -> void:
 	health = max_health
@@ -59,10 +68,14 @@ func _ready() -> void:
 	if is_multiplayer_authority():
 		if camera:
 			camera.current = true
+			camera.fov = hipfire_fov_degrees
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		_setup_hud()
 	else:
 		if camera:
 			camera.current = false
+		if weapon_manager:
+			weapon_manager.visible = false
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_multiplayer_authority():
@@ -90,12 +103,27 @@ func _physics_process(delta: float) -> void:
 	_align_body_to_up(new_up, delta)
 	up_direction = new_up
 
+	_apply_aim(delta)
 	_apply_look(delta)
 	_apply_movement(new_up, delta)
 
 	if _wants_melee():
 		melee.try_activate()
-	weapon_manager.handle_input(delta, _wants_fire(), _get_weapon_switch())
+	weapon_manager.handle_input(delta, _wants_fire(), _get_weapon_switch(), _get_weapon_scroll())
+
+	if hud:
+		hud.update_health(health, max_health)
+		hud.update_weapons(weapon_manager.get_weapon_names(), weapon_manager.get_weapon_colors(), weapon_manager.get_current_index())
+
+## Right-click ADS: smoothly zooms the camera FOV and (via _apply_look)
+## drops mouse sensitivity to match, like a standard FPS aim-down-sights.
+func _apply_aim(delta: float) -> void:
+	is_aiming = _wants_aim()
+	if camera == null:
+		return
+	var target_fov: float = ads_fov_degrees if is_aiming else hipfire_fov_degrees
+	var t: float = clamp(ads_transition_speed * delta, 0.0, 1.0)
+	camera.fov = lerp(camera.fov, target_fov, t)
 
 func _align_body_to_up(new_up: Vector3, delta: float) -> void:
 	var current_up: Vector3 = global_transform.basis.y
@@ -126,9 +154,10 @@ func _apply_look(_delta: float) -> void:
 	var look: Vector2 = _get_look_delta()
 	if look == Vector2.ZERO:
 		return
-	rotate_object_local(Vector3.UP, -look.x * mouse_sensitivity)
+	var sensitivity: float = mouse_sensitivity * (ads_sensitivity_multiplier if is_aiming else 1.0)
+	rotate_object_local(Vector3.UP, -look.x * sensitivity)
 	var pitch_limit: float = deg_to_rad(pitch_limit_degrees)
-	head.rotation.x = clamp(head.rotation.x - look.y * mouse_sensitivity, -pitch_limit, pitch_limit)
+	head.rotation.x = clamp(head.rotation.x - look.y * sensitivity, -pitch_limit, pitch_limit)
 
 func _apply_movement(up: Vector3, delta: float) -> void:
 	var forward: Vector3 = -global_transform.basis.z
@@ -206,6 +235,9 @@ func _wants_jump() -> bool:
 func _wants_fire() -> bool:
 	return Input.is_action_pressed("fire")
 
+func _wants_aim() -> bool:
+	return Input.is_action_pressed("aim")
+
 func _wants_melee() -> bool:
 	return Input.is_action_just_pressed("melee")
 
@@ -219,6 +251,15 @@ func _get_weapon_switch() -> int:
 	if Input.is_action_just_pressed("weapon_planetbuster"):
 		return 3
 	return -1
+
+## Returns -1 / 0 / +1: scroll-wheel weapon cycling, layered on top of the
+## direct number-key switch above.
+func _get_weapon_scroll() -> int:
+	if Input.is_action_just_pressed("weapon_next"):
+		return 1
+	if Input.is_action_just_pressed("weapon_prev"):
+		return -1
+	return 0
 
 ## ---- Combat --------------------------------------------------------------
 
@@ -286,6 +327,12 @@ func get_muzzle_transform() -> Transform3D:
 
 func grant_weapon(id: String) -> void:
 	weapon_manager.grant_weapon(id)
+
+const HUD_SCENE: PackedScene = preload("res://scenes/ui/HUD.tscn")
+
+func _setup_hud() -> void:
+	hud = HUD_SCENE.instantiate()
+	add_child(hud)
 
 ## Sets up what gets replicated to other peers. Position/rotation/velocity
 ## sync continuously so remote players look reasonably smooth; health and

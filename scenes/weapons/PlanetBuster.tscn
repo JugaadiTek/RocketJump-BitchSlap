@@ -1,8 +1,25 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/weapons/PlanetBuster.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/weapons/PlanetBusterProjectile.tscn" id="2"]
 
+[sub_resource type="BoxMesh" id="BoxMesh_body"]
+size = Vector3(0.2, 0.18, 0.38)
+
+[sub_resource type="SphereMesh" id="SphereMesh_orb"]
+radius = 0.13
+height = 0.26
+
 [node name="PlanetBuster" type="Node3D"]
 script = ExtResource("1")
 shell_scene = ExtResource("2")
+
+[node name="ViewModel" type="Node3D" parent="."]
+
+[node name="Body" type="MeshInstance3D" parent="ViewModel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, -0.22)
+mesh = SubResource("BoxMesh_body")
+
+[node name="Orb" type="MeshInstance3D" parent="ViewModel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.02, -0.44)
+mesh = SubResource("SphereMesh_orb")

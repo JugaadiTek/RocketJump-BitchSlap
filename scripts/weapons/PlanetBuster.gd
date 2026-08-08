@@ -8,6 +8,7 @@ func _init() -> void:
 	weapon_name = "Planet Buster"
 	fire_cooldown = 2.0
 	consumed_on_fire = true
+	weapon_color = Color(0.75, 0.25, 0.9)
 
 func _do_fire(muzzle_transform: Transform3D, aim_direction: Vector3) -> void:
 	if shell_scene == null:
