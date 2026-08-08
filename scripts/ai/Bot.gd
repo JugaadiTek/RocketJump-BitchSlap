@@ -36,6 +36,13 @@ var _ai_weapon_index: int = -1
 func _uses_mouse_look() -> bool:
 	return false
 
+## Bots ARE simulation-authoritative (is_multiplayer_authority() is true for
+## them, same as it is by default for the real local player in offline
+## play) but must never be treated as "the screen the human is looking
+## through" - see Player._is_local_view().
+func _is_local_view() -> bool:
+	return false
+
 func _physics_process(delta: float) -> void:
 	if is_multiplayer_authority() and not is_dead:
 		_think(delta)

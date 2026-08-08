@@ -65,7 +65,13 @@ func _ready() -> void:
 	add_to_group("players")
 	add_to_group("damageable")
 	_setup_replication()
-	if is_multiplayer_authority():
+	# is_multiplayer_authority() means "this peer simulates this body" - true
+	# for bots too (they're simulated locally/by the host). _is_local_view()
+	# separately means "this is the human sitting at THIS screen", which
+	# Bot.gd overrides to always be false. Without that second check, bots
+	# would default to the same authority id as the real player in offline
+	# play and each spawn their own camera/HUD/mouse-capture.
+	if is_multiplayer_authority() and _is_local_view():
 		if camera:
 			camera.current = true
 			camera.fov = hipfire_fov_degrees
@@ -76,6 +82,12 @@ func _ready() -> void:
 			camera.current = false
 		if weapon_manager:
 			weapon_manager.visible = false
+
+## True for the human-controlled local view; Bot overrides this to false. Not
+## to be confused with is_multiplayer_authority(), which controls whether
+## movement/combat logic runs on this peer and must stay true for bots.
+func _is_local_view() -> bool:
+	return true
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_multiplayer_authority():
