@@ -32,3 +32,11 @@ A Standard First Person Shooter Player Controller inspired by Quake 3 Arenas Fee
    - Do not perfectly emulate physics, focus on fun gameplay and ridiculous moments.
 - Basic NPC opponent AI logic.
 - Basic IP Connect Multiplayer.
+
+
+IGNORE THE ATTACHED IMAGE.
+- Planets are all the same colors and size.
+  - Editing the dictionary in OrbitalBody.gd does not impact size, or color, but does impact orbital speed.
+- Players bounce too easily off of planets.
+  - Players should default to running and jumping around the spheres like one would normally run around in quake 3 arena.
+  - Only rocket jumps, jump pads or impacts from  other players should have the ability to launch players into orbit.

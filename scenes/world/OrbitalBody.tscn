@@ -1,10 +1,10 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene format=3 uid="uid://c7kwwetm0t0oa"]
 
-[ext_resource type="Script" path="res://scripts/world/OrbitalBody.gd" id="1"]
+[ext_resource type="Script" uid="uid://dy5mwhm34yxqf" path="res://scripts/world/OrbitalBody.gd" id="1"]
 
 [sub_resource type="SphereMesh" id="SphereMesh_1"]
-radius = 40.0
-height = 80.0
+radius = 100.0
+height = 200.0
 radial_segments = 48
 rings = 24
 
@@ -15,16 +15,15 @@ roughness = 0.9
 [sub_resource type="SphereShape3D" id="SphereShape3D_1"]
 radius = 40.0
 
-[node name="OrbitalBody" type="Node3D"]
+[node name="OrbitalBody" type="Node3D" unique_id=1749311028]
 script = ExtResource("1")
 
-[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=1087493654]
 mesh = SubResource("SphereMesh_1")
 surface_material_override/0 = SubResource("StandardMaterial3D_1")
 
-[node name="StaticBody3D" type="StaticBody3D" parent="."]
-collision_layer = 1
+[node name="StaticBody3D" type="StaticBody3D" parent="." unique_id=982071978]
 collision_mask = 0
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="StaticBody3D"]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="StaticBody3D" unique_id=1486718168]
 shape = SubResource("SphereShape3D_1")
