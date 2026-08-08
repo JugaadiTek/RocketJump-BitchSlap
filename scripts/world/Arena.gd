@@ -11,14 +11,14 @@ extends Node3D
 const ORBIT_DATA: Array[Dictionary] = [
 	# The central binary - always present, never shatterable.
 	{
-		"name": "Alpha", "radius": 45.0, "surface_gravity": 22.0,
-		"orbit_radius": 70.0, "orbit_speed": 0.05, "start_angle": 0.0,
+		"name": "Alpha", "radius": 25.0, "surface_gravity": 22.0,
+		"orbit_radius": 70.0, "orbit_speed": 0.25, "start_angle": 0.0,
 		"can_be_shattered": false, "color": Color(0.55, 0.48, 0.42),
 	},
 	{
-		"name": "Beta", "radius": 35.0, "surface_gravity": 19.0,
-		"orbit_radius": 55.0, "orbit_speed": 0.05, "start_angle": PI,
-		"can_be_shattered": false, "color": Color(0.42, 0.46, 0.55),
+		"name": "Beta", "radius": 15.0, "surface_gravity": 19.0,
+		"orbit_radius": 55.0, "orbit_speed": 0.15, "start_angle": PI,
+		"can_be_shattered": false, "color": Color(0.2, 0.16, 0.55),
 	},
 	# Outer orbs - shatterable by the Planet Buster.
 	{
@@ -37,7 +37,7 @@ const ORBIT_DATA: Array[Dictionary] = [
 		"can_be_shattered": true, "color": Color(0.35, 0.5, 0.4),
 	},
 	{
-		"name": "Titan", "radius": 172.0, "surface_gravity": 26.0,
+		"name": "Titan", "radius": 32.0, "surface_gravity": 26.0,
 		"orbit_radius": 620.0, "orbit_speed": 0.006, "start_angle": 1.3,
 		"can_be_shattered": true, "color": Color(0.45, 0.4, 0.55),
 	},
@@ -48,7 +48,7 @@ const SPAWNS_PER_BODY: int = 3
 @export var orbital_body_scene: PackedScene
 @export var player_scene: PackedScene
 @export var bot_scene: PackedScene
-@export var bot_count: int = 3
+@export var bot_count: int = 16
 @export var planet_buster_pickup_scene: PackedScene
 @export var planet_buster_pad_bodies: Array[String] = ["Ceres", "Vesta"]
 

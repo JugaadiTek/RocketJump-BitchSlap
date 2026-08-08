@@ -3,8 +3,8 @@
 [ext_resource type="Script" uid="uid://dy5mwhm34yxqf" path="res://scripts/world/OrbitalBody.gd" id="1"]
 
 [sub_resource type="SphereMesh" id="SphereMesh_1"]
-radius = 100.0
-height = 200.0
+radius = 50.0
+height = 100.0
 radial_segments = 48
 rings = 24
 
