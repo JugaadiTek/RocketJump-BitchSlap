@@ -7,6 +7,45 @@ extends CanvasLayer
 @onready var health_label: Label = $Root/HealthPanel/HealthLabel
 @onready var current_weapon_label: Label = $Root/WeaponPanel/CurrentWeaponLabel
 @onready var weapon_list: VBoxContainer = $Root/WeaponPanel/WeaponList
+@onready var kills_label: Label = $Root/KillsPanel/KillsLabel
+@onready var scoreboard_panel: PanelContainer = $Root/ScoreboardPanel
+@onready var score_list: VBoxContainer = $Root/ScoreboardPanel/ScoreboardVBox/ScoreList
+
+func update_kills(kills: int) -> void:
+	kills_label.text = "Kills: %d" % kills
+
+## `entries` is MatchState.get_all_scores(): Array[{player_id, name, score}],
+## already sorted highest-first.
+func update_scoreboard(is_open: bool, entries: Array[Dictionary]) -> void:
+	scoreboard_panel.visible = is_open
+	if not is_open:
+		return
+
+	if score_list.get_child_count() != entries.size():
+		for c in score_list.get_children():
+			score_list.remove_child(c)
+			c.queue_free()
+		for i in range(entries.size()):
+			var row := HBoxContainer.new()
+			var name_lbl := Label.new()
+			name_lbl.name = "Name"
+			name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			name_lbl.add_theme_font_size_override("font_size", 18)
+			row.add_child(name_lbl)
+			var score_lbl := Label.new()
+			score_lbl.name = "Score"
+			score_lbl.custom_minimum_size = Vector2(80, 0)
+			score_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+			score_lbl.add_theme_font_size_override("font_size", 18)
+			row.add_child(score_lbl)
+			score_list.add_child(row)
+
+	for i in range(entries.size()):
+		var row: HBoxContainer = score_list.get_child(i)
+		var name_lbl: Label = row.get_node("Name")
+		var score_lbl: Label = row.get_node("Score")
+		name_lbl.text = str(entries[i]["name"])
+		score_lbl.text = str(entries[i]["score"])
 
 func update_health(current: float, max_health: float) -> void:
 	health_bar.max_value = max_health

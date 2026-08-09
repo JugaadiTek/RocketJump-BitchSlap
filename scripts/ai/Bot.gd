@@ -189,6 +189,9 @@ func _wants_fire() -> bool:
 func _wants_aim() -> bool:
 	return false # bots don't ADS in this starter version
 
+func _wants_scoreboard() -> bool:
+	return false # bots have no HUD/scoreboard to show
+
 func _wants_melee() -> bool:
 	return _ai_wants_melee
 

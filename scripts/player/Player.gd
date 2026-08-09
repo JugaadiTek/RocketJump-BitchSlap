@@ -18,8 +18,23 @@ extends CharacterBody3D
 @export var ground_friction: float = 8.0
 @export var air_accel: float = 8.0
 @export var air_speed_cap: float = 15.0 ## classic Q3 "aircap" trick, lets strafe-jumping exceed max_ground_speed
-@export var jump_speed: float = 6.5
+## Target apex height (meters) for a normal jump. Actual jump speed is
+## derived from this and the LOCAL planet's gravity each time you jump, so
+## a hop feels like a consistent Quake-3 hop everywhere instead of turning
+## into a moon-launch on a small/low-gravity body.
+@export var jump_height: float = 1.1
 @export var align_to_gravity_speed: float = 10.0 ## rad/sec, how fast the body re-levels on a new planet
+
+@export_group("Ground Stick")
+## Within this many meters of a planet's surface, an extra corrective pull
+## is applied on top of normal gravity so ordinary running/jumping can never
+## build up enough outward speed to skim off into orbit - normal play should
+## only ever produce a modest Quake-3-style hop. This is suspended for a
+## short window after apply_impulse() (rocket splash, melee launch, jump
+## pads), which is the ONLY way to actually get launched into a big arc.
+@export var ground_stick_range: float = 3.0
+@export var ground_stick_accel: float = 45.0
+@export var impulse_grace_duration: float = 2.0
 
 @export_group("Look")
 @export var mouse_sensitivity: float = 0.0025
@@ -41,11 +56,22 @@ var is_dead: bool = false
 var is_aiming: bool = false
 var current_gravity: Vector3 = Vector3.ZERO
 var last_damage_instigator_path: NodePath
+var _impulse_grace_remaining: float = 0.0
+
+## Identity for scoring/display - distinct from multiplayer_authority (a
+## networking concept). Bots default to authority id 1 in offline play, same
+## as the real local player, so authority alone can't tell them apart; Arena
+## assigns each spawned Player/Bot a unique player_id (real peer id for
+## humans, a negative id for bots) right after instancing it.
+var player_id: int = -1
+var display_name: String = "Player"
 
 var _mouse_delta := Vector2.ZERO
+var _pending_weapon_scroll: int = 0
 var _has_aligned_once := false
 var _default_collision_layer: int
 var _default_collision_mask: int
+var _prev_edge_states: Dictionary = {}
 
 @onready var head: Node3D = $Head
 @onready var camera: Camera3D = $Head/Camera3D
@@ -96,7 +122,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		_mouse_delta += event.relative
-	if event.is_action_pressed("ui_cancel"):
+	if event is InputEventMouseButton and event.pressed:
+		# Scroll wheel clicks are transient (no sustained "held" state), so
+		# they have to be caught here rather than polled in _get_weapon_scroll().
+		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_pending_weapon_scroll += 1
+		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_pending_weapon_scroll -= 1
+	if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_ESCAPE:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED else Input.MOUSE_MODE_CAPTURED
 
 ## True for the human-controlled subclass usage; Bot overrides this to false
@@ -115,6 +148,11 @@ func _physics_process(delta: float) -> void:
 	_align_body_to_up(new_up, delta)
 	up_direction = new_up
 
+	if _impulse_grace_remaining > 0.0:
+		_impulse_grace_remaining -= delta
+	else:
+		_apply_ground_stick(delta)
+
 	_apply_aim(delta)
 	_apply_look(delta)
 	_apply_movement(new_up, delta)
@@ -126,6 +164,24 @@ func _physics_process(delta: float) -> void:
 	if hud:
 		hud.update_health(health, max_health)
 		hud.update_weapons(weapon_manager.get_weapon_names(), weapon_manager.get_weapon_colors(), weapon_manager.get_current_index())
+		hud.update_kills(MatchState.get_score(player_id))
+		hud.update_scoreboard(_wants_scoreboard(), MatchState.get_all_scores())
+
+## Extra corrective pull toward the nearest planet's center whenever close
+## to its surface, so normal running/jumping can't accumulate enough
+## outward speed to skim off into an accidental orbit (see class doc). Not
+## applied while _impulse_grace_remaining is active.
+func _apply_ground_stick(delta: float) -> void:
+	var body: OrbitalBody = GravityManager.get_nearest_body(global_position)
+	if body == null or body.is_shattered:
+		return
+	var dist_to_surface: float = global_position.distance_to(body.global_position) - body.radius
+	if dist_to_surface > ground_stick_range:
+		return
+	var to_center: Vector3 = (body.global_position - global_position)
+	if to_center.length_squared() < 0.0001:
+		return
+	velocity += to_center.normalized() * ground_stick_accel * delta
 
 ## Right-click ADS: smoothly zooms the camera FOV and (via _apply_look)
 ## drops mouse sensitivity to match, like a standard FPS aim-down-sights.
@@ -189,7 +245,12 @@ func _apply_movement(up: Vector3, delta: float) -> void:
 		vel_horizontal = _apply_friction(vel_horizontal, ground_friction, delta)
 		vel_horizontal = _q3_accelerate(wish_dir, max_ground_speed, ground_accel, vel_horizontal, delta)
 		if _wants_jump():
-			vel_up = jump_speed
+			# v = sqrt(2 * g * h): same target hop height everywhere, regardless
+			# of how strong or weak this particular planet's gravity is. Floored
+			# so a jump near the edge of a body's influence (where gravity fades
+			# toward zero) doesn't produce an absurd launch speed.
+			var g_mag: float = max(current_gravity.length(), 4.0)
+			vel_up = sqrt(2.0 * g_mag * jump_height)
 	else:
 		vel_horizontal = _q3_air_accelerate(wish_dir, max_ground_speed, air_accel, air_speed_cap, vel_horizontal, delta)
 
@@ -229,11 +290,19 @@ func _q3_air_accelerate(wish_dir: Vector3, wish_speed: float, accel: float, spee
 	var accel_speed: float = min(accel * wish_speed * delta, add_speed)
 	return vel + wish_dir * accel_speed
 
-## ---- Input hooks (override in Bot.gd) -----------------------------------
+## ---- Input hooks (override in Bot.gd) -------------------------------------
+## These read hardware state directly (Input.is_physical_key_pressed /
+## is_mouse_button_pressed) instead of named InputMap actions. Named actions
+## depend on project.godot's [input] section parsing correctly - which is a
+## hand-authored resource format that's sensitive to exact Godot-build
+## property sets and can silently fail on a different engine version - so
+## gameplay-critical input intentionally does not depend on it at all here.
+## WASD / Space / F / number keys / mouse buttons are effectively hardcoded;
+## remapping them means editing the keycodes below.
 func _get_move_axis() -> Vector2:
 	return Vector2(
-		Input.get_action_strength("move_right") - Input.get_action_strength("move_left"),
-		Input.get_action_strength("move_forward") - Input.get_action_strength("move_back")
+		(1.0 if Input.is_physical_key_pressed(KEY_D) else 0.0) - (1.0 if Input.is_physical_key_pressed(KEY_A) else 0.0),
+		(1.0 if Input.is_physical_key_pressed(KEY_W) else 0.0) - (1.0 if Input.is_physical_key_pressed(KEY_S) else 0.0)
 	)
 
 func _get_look_delta() -> Vector2:
@@ -242,45 +311,58 @@ func _get_look_delta() -> Vector2:
 	return d
 
 func _wants_jump() -> bool:
-	return Input.is_action_pressed("jump")
+	return Input.is_physical_key_pressed(KEY_SPACE)
 
 func _wants_fire() -> bool:
-	return Input.is_action_pressed("fire")
+	return Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 
 func _wants_aim() -> bool:
-	return Input.is_action_pressed("aim")
+	return Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+
+func _wants_scoreboard() -> bool:
+	return Input.is_physical_key_pressed(KEY_TAB)
 
 func _wants_melee() -> bool:
-	return Input.is_action_just_pressed("melee")
+	return _just_pressed("melee", Input.is_physical_key_pressed(KEY_F))
 
 func _get_weapon_switch() -> int:
-	if Input.is_action_just_pressed("weapon_rocket"):
+	if _just_pressed("wpn0", Input.is_physical_key_pressed(KEY_1)):
 		return 0
-	if Input.is_action_just_pressed("weapon_railgun"):
+	if _just_pressed("wpn1", Input.is_physical_key_pressed(KEY_2)):
 		return 1
-	if Input.is_action_just_pressed("weapon_slug"):
+	if _just_pressed("wpn2", Input.is_physical_key_pressed(KEY_3)):
 		return 2
-	if Input.is_action_just_pressed("weapon_planetbuster"):
+	if _just_pressed("wpn3", Input.is_physical_key_pressed(KEY_4)):
 		return 3
 	return -1
 
 ## Returns -1 / 0 / +1: scroll-wheel weapon cycling, layered on top of the
-## direct number-key switch above.
+## direct number-key switch above. Fed by _unhandled_input(), since wheel
+## clicks are transient events rather than a sustained "held" state.
 func _get_weapon_scroll() -> int:
-	if Input.is_action_just_pressed("weapon_next"):
-		return 1
-	if Input.is_action_just_pressed("weapon_prev"):
-		return -1
-	return 0
+	var s: int = sign(_pending_weapon_scroll)
+	_pending_weapon_scroll = 0
+	return s
+
+## Manual edge-detection helper ("was this false last frame, true now") for
+## the raw-polled keys above, replacing what Input.is_action_just_pressed()
+## would normally give for free with a named action.
+func _just_pressed(id: String, pressed_now: bool) -> bool:
+	var was_pressed: bool = _prev_edge_states.get(id, false)
+	_prev_edge_states[id] = pressed_now
+	return pressed_now and not was_pressed
 
 ## ---- Combat --------------------------------------------------------------
 
-## Direct velocity change - used for rocket-jump splash and bitchslap launches.
-## Works identically whether the player is grounded or drifting in zero-g.
+## Direct velocity change - used for rocket-jump splash, bitchslap launches,
+## and jump pads. Grants a brief exemption from ground-stick (see
+## _apply_ground_stick) so the launch actually carries instead of being
+## immediately corrected back down while still near the surface.
 func apply_impulse(force: Vector3) -> void:
 	if is_dead:
 		return
 	velocity += force
+	_impulse_grace_remaining = impulse_grace_duration
 
 @rpc("any_peer", "call_local", "reliable")
 func network_apply_impulse(force: Vector3) -> void:
@@ -312,9 +394,9 @@ func _die(instigator: Node, weapon_name: String) -> void:
 	collision_layer = 0
 	collision_mask = 1 # still collides with world/planets so we don't fall through, but hits nothing else
 	var killer_id: int = -1
-	if instigator and instigator.has_method("get_multiplayer_authority"):
-		killer_id = instigator.get_multiplayer_authority()
-	MatchState.report_frag(get_multiplayer_authority(), killer_id, weapon_name)
+	if instigator and "player_id" in instigator:
+		killer_id = instigator.player_id
+	MatchState.report_frag(player_id, killer_id, weapon_name)
 	await get_tree().create_timer(respawn_delay).timeout
 	_respawn()
 

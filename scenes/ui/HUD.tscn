@@ -1,6 +1,22 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/HUD.gd" id="1"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_scoreboard"]
+bg_color = Color(0.05, 0.05, 0.08, 0.88)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.4, 0.45, 0.55, 0.9)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+content_margin_left = 24.0
+content_margin_top = 18.0
+content_margin_right = 24.0
+content_margin_bottom = 18.0
 
 [node name="HUD" type="CanvasLayer"]
 script = ExtResource("1")
@@ -74,3 +90,78 @@ text = "Rocket Launcher"
 [node name="WeaponList" type="VBoxContainer" parent="Root/WeaponPanel"]
 layout_mode = 2
 alignment = 2
+
+[node name="KillsPanel" type="Control" parent="Root"]
+layout_mode = 1
+anchor_left = 1.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 0.0
+offset_left = -220.0
+offset_top = 20.0
+offset_right = -20.0
+offset_bottom = 60.0
+grow_horizontal = 0
+mouse_filter = 2
+
+[node name="KillsLabel" type="Label" parent="Root/KillsPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_font_sizes/font_size = 24
+horizontal_alignment = 2
+vertical_alignment = 1
+text = "Kills: 0"
+
+[node name="ScoreboardPanel" type="PanelContainer" parent="Root"]
+visible = false
+layout_mode = 1
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -220.0
+offset_top = -170.0
+offset_right = 220.0
+offset_bottom = 170.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_scoreboard")
+
+[node name="ScoreboardVBox" type="VBoxContainer" parent="Root/ScoreboardPanel"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Title" type="Label" parent="Root/ScoreboardPanel/ScoreboardVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+horizontal_alignment = 1
+text = "SCOREBOARD"
+
+[node name="HeaderRow" type="HBoxContainer" parent="Root/ScoreboardPanel/ScoreboardVBox"]
+layout_mode = 2
+
+[node name="NameHeader" type="Label" parent="Root/ScoreboardPanel/ScoreboardVBox/HeaderRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 15
+modulate = Color(0.7, 0.7, 0.75, 1)
+text = "Name"
+
+[node name="KillsHeader" type="Label" parent="Root/ScoreboardPanel/ScoreboardVBox/HeaderRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(80, 0)
+theme_override_font_sizes/font_size = 15
+modulate = Color(0.7, 0.7, 0.75, 1)
+horizontal_alignment = 2
+text = "Kills"
+
+[node name="Separator" type="HSeparator" parent="Root/ScoreboardPanel/ScoreboardVBox"]
+layout_mode = 2
+
+[node name="ScoreList" type="VBoxContainer" parent="Root/ScoreboardPanel/ScoreboardVBox"]
+layout_mode = 2

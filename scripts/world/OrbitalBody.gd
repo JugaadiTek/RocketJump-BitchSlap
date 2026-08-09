@@ -57,6 +57,18 @@ var _orbit_angle: float = 0.0
 @onready var static_body: StaticBody3D = $StaticBody3D
 
 func _ready() -> void:
+	# Sub-resources embedded in a .tscn (the mesh, its material, and the
+	# collision shape) are the SAME object across every instantiate() call
+	# unless explicitly duplicated - without this, every planet's visuals
+	# AND collision would silently end up as whatever the last-built body in
+	# Arena._build_orbital_bodies() set, since they'd all be pointing at one
+	# shared resource.
+	mesh.mesh = mesh.mesh.duplicate()
+	var mat: Material = mesh.get_surface_override_material(0)
+	if mat:
+		mesh.set_surface_override_material(0, mat.duplicate())
+	collision.shape = collision.shape.duplicate()
+
 	add_to_group("orbital_bodies")
 	_orbit_angle = orbit_start_angle
 	_apply_visual_scale()
