@@ -1,15 +1,15 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene format=3 uid="uid://dfd0fiibjv132"]
 
-[ext_resource type="Script" path="res://scripts/world/Arena.gd" id="1"]
+[ext_resource type="Script" uid="uid://q7xffosegge2" path="res://scripts/world/Arena.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/world/OrbitalBody.tscn" id="2"]
 [ext_resource type="PackedScene" path="res://scenes/player/Player.tscn" id="3"]
-[ext_resource type="PackedScene" path="res://scenes/npc/Bot.tscn" id="4"]
+[ext_resource type="PackedScene" uid="uid://erd58ceclsnq" path="res://scenes/npc/Bot.tscn" id="4"]
 [ext_resource type="PackedScene" path="res://scenes/weapons/PlanetBusterPickup.tscn" id="5"]
 [ext_resource type="Environment" path="res://scenes/world/default_environment.tres" id="6"]
 [ext_resource type="PackedScene" path="res://scenes/world/JumpPad.tscn" id="7"]
 [ext_resource type="PackedScene" path="res://scenes/world/ArenaBoundary.tscn" id="8"]
 
-[node name="Arena" type="Node3D"]
+[node name="Arena" type="Node3D" unique_id=927877128]
 script = ExtResource("1")
 orbital_body_scene = ExtResource("2")
 player_scene = ExtResource("3")
@@ -18,30 +18,32 @@ bot_count = 3
 planet_buster_pickup_scene = ExtResource("5")
 jump_pad_scene = ExtResource("7")
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1828346846]
 environment = ExtResource("6")
 
-[node name="Sun" type="DirectionalLight3D" parent="."]
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=48793098]
 transform = Transform3D(0.7, -0.5, 0.5, 0, 0.7, 0.7, -0.7, -0.5, 0.5, 0, 200, 0)
+light_color = Color(1, 1, 0.6666667, 1)
 light_energy = 1.3
 shadow_enabled = true
 
-[node name="ArenaBoundary" parent="." instance=ExtResource("8")]
+[node name="ArenaBoundary" parent="." unique_id=2034983708 instance=ExtResource("8")]
 
-[node name="OrbitCenter" type="Marker3D" parent="."]
+[node name="OrbitCenter" type="Marker3D" parent="." unique_id=1908358598]
 
-[node name="OrbitalBodies" type="Node3D" parent="."]
+[node name="OrbitalBodies" type="Node3D" parent="." unique_id=160619697]
 
-[node name="SpawnPoints" type="Node3D" parent="."]
+[node name="SpawnPoints" type="Node3D" parent="." unique_id=220723123]
 
-[node name="Players" type="Node3D" parent="."]
+[node name="Players" type="Node3D" parent="." unique_id=1638178181]
 
-[node name="PlayerSpawner" type="MultiplayerSpawner" parent="."]
+[node name="PlayerSpawner" type="MultiplayerSpawner" parent="." unique_id=192042943]
 _spawnable_scenes = PackedStringArray("res://scenes/player/Player.tscn")
 spawn_path = NodePath("../Players")
+spawn_limit = 32
 
-[node name="Bots" type="Node3D" parent="."]
+[node name="Bots" type="Node3D" parent="." unique_id=1263293128]
 
-[node name="BotSpawner" type="MultiplayerSpawner" parent="."]
-_spawnable_scenes = PackedStringArray("res://scenes/npc/Bot.tscn")
+[node name="BotSpawner" type="MultiplayerSpawner" parent="." unique_id=237700918]
+_spawnable_scenes = PackedStringArray("uid://erd58ceclsnq")
 spawn_path = NodePath("../Bots")
