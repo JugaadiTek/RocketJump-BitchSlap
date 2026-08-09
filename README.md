@@ -35,14 +35,47 @@ A Standard First Person Shooter Player Controller inspired by Quake 3 Arenas Fee
 
 
 ### Next Steps:
-- Make the planet Buster weapon crosshairs lock on a planet in its sites, then the weapon auto navigates to that planet. 
-	- Not able to target planets that are too close... (no suicide shots).
-	- When planet is destroy it is busted apart into 2-5 smaller rogue satelites that become moons for other planets in the system.
-- Make the Bots also seek out and target each other
-	- add a random variance range to bot attack accuracy with lower and upper bounds. 
-	- for slower weapons have their shots lead the opponents movement.
-- Give The Slugs that are shot out of the slug gun a small amount of hit points, and allow them to take damage from other (non-slug) weapons.
-	- Make the slug gun fire like a slow speed automatic weapon, (hold fire button).
-
-
-
+- Planets:
+	- Allow Eliptical Orbits to form.
+	- Give each planet a random spin and axis tilt.
+	- If a planets orbit hits the outside of the arena, destroy it and spawn 1-3 smaller orbs to launch towards the center of the system targeting stable orbits around other orbs.
+	- Spawn a variety of Buildings with navigateable interiors on the Planets to provide places to seek cover and fire from.
+		- Spawn 0-3 Towers on each planet that can be used to gain a height advantage over other players. The tower height should be equal to the radius of the planet it is on.
+- Players and Bots:
+	- Set the standard number of total players including bots to always be 32.
+	- Weapons: 
+		- New Weapons:
+			- The Space Board: 
+				- can only switch too when they are not on a planet.
+				- allows players to change their trajectory in mid air.
+				- A hand held jet pack held in front of the player like a boogie board.
+			- Grappling Hook:
+				- can be used to grapple onto planets or buildings and pull the player towards them.
+				- can be used to grapple onto other players and pull them towards the player.
+		- Update Existing Weapons:
+			- Rail Gun: 
+				- Make the rail gun have a charge up time before it can fire, and make it so that the longer the player holds the fire button, the more damage it does.
+				- Add a sniping scope to the rail gun that allows players to zoom in and aim more accurately.
+			- Planet Buster: 
+				- Make the weapon crosshairs lock on a planet in its sites, then the weapon auto navigates to that planet. 
+				- Not able to target planets that are too close... (no suicide shots).
+				- When planet is destroy it is busted apart into 2-5 smaller rogue satelites that become moons for other planets in the system.
+			- Slug Gun:
+				- Give The Slugs that are shot out of the slug gun a small amount of hit points, and allow them to take damage from other (non-slug) weapons.
+				- Make the weapon a medium speed automatic. (hold fire button)
+			- Rocket Launcher:
+				- Deforms Planet Mesh in the blast radius on contact.
+	- Spawning and Respawning:
+		- When a player spawns, they start facing the orbiting bodies from the outermost barrier. 
+			- They have 10 seconds to choose a target planet to launch towards, by holding the fire button while aiming at it.
+			- when a planet is in their sights the crosshairs should turn green and have a locked box around them. 
+			- if they dont select a planet in 10 seconds, they will be launched towards the closest planet to them.
+		- They then shoot in on a fast trajectory to land on their choice planet from their current position.
+			- leaving a trail of particles behind them.
+			- A smoke bomb where they land.
+			- Impact the planets Orbit by 0.1% to 0.3%.
+	- Bots
+		- Create a Dictionary of random names for the bots to choose from when they spawn.
+		- Make the Bots also seek out and target each other
+			- add a random variance range to bot attack accuracy with lower and upper bounds.
+			- for slower weapons have their shots lead the opponents movement.
