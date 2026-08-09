@@ -33,6 +33,14 @@ A Standard First Person Shooter Player Controller inspired by Quake 3 Arenas Fee
 - Basic NPC opponent AI logic.
 - Basic IP Connect Multiplayer.
 
+### Next Steps:
+- Please revert the changes related to flight control.
+	- Players are flying off the planets too easily. Once they have landed they should move normally along the surface.
+- Outer boundary should launch players at a much higher speed towards the nearest planet with a guided trajectory and a managed landing.
+- Set the standard number of total players including bots to always be 32.
+- Rail Gun:
+	- Make the rail gun have a charge up time before it can fire, and make it so that the longer the player holds the fire button, the more damage it does.
+	- Add a sniping scope to the rail gun that allows players to zoom in and aim more accurately.
 
 ### Next Steps:
 - Planets:
@@ -42,7 +50,6 @@ A Standard First Person Shooter Player Controller inspired by Quake 3 Arenas Fee
 	- Spawn a variety of Buildings with navigateable interiors on the Planets to provide places to seek cover and fire from.
 		- Spawn 0-3 Towers on each planet that can be used to gain a height advantage over other players. The tower height should be equal to the radius of the planet it is on.
 - Players and Bots:
-	- Set the standard number of total players including bots to always be 32.
 	- Weapons: 
 		- New Weapons:
 			- The Space Board: 
@@ -53,9 +60,6 @@ A Standard First Person Shooter Player Controller inspired by Quake 3 Arenas Fee
 				- can be used to grapple onto planets or buildings and pull the player towards them.
 				- can be used to grapple onto other players and pull them towards the player.
 		- Update Existing Weapons:
-			- Rail Gun: 
-				- Make the rail gun have a charge up time before it can fire, and make it so that the longer the player holds the fire button, the more damage it does.
-				- Add a sniping scope to the rail gun that allows players to zoom in and aim more accurately.
 			- Planet Buster: 
 				- Make the weapon crosshairs lock on a planet in its sites, then the weapon auto navigates to that planet. 
 				- Not able to target planets that are too close... (no suicide shots).
