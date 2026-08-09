@@ -32,7 +32,7 @@ func _add_starting_weapon(scene: PackedScene) -> void:
 	add_child(weapon)
 	_weapons.append(weapon)
 
-func handle_input(_delta: float, wants_fire: bool, switch_to_index: int, scroll_direction: int) -> void:
+func handle_input(delta: float, wants_fire: bool, switch_to_index: int, scroll_direction: int) -> void:
 	var switched: bool = false
 	if switch_to_index >= 0 and switch_to_index < _weapons.size() and switch_to_index != _current_index:
 		_current_index = switch_to_index
@@ -45,8 +45,13 @@ func handle_input(_delta: float, wants_fire: bool, switch_to_index: int, scroll_
 
 	if _weapons.is_empty():
 		return
+
+	var weapon: Weapon = _weapons[_current_index]
+	# Always tick the active weapon so charge accumulates while held and
+	# drains/resets on release, regardless of cooldown state.
+	weapon.tick(delta, wants_fire)
+
 	if wants_fire:
-		var weapon: Weapon = _weapons[_current_index]
 		var fired: bool = weapon.fire(_player.get_muzzle_transform(), _player.get_look_direction())
 		if fired and weapon.consumed_on_fire:
 			_remove_current_weapon()

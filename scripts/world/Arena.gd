@@ -71,12 +71,14 @@ const ORBIT_DATA: Array[Dictionary] = [
 	},
 ]
 
-const SPAWNS_PER_BODY: int = 32
+const SPAWNS_PER_BODY: int = 4
 
 @export var orbital_body_scene: PackedScene
 @export var player_scene: PackedScene
 @export var bot_scene: PackedScene
-@export var bot_count: int = 32
+## Always 31 bots so total player count (1 human + 31) == 32.
+## In multiplayer, bots fill slots not taken by human peers.
+@export var bot_count: int = 31
 @export var planet_buster_pickup_scene: PackedScene
 @export var planet_buster_pad_bodies: Array[String] = ["Verdant", "Umbra"]
 @export var jump_pad_scene: PackedScene

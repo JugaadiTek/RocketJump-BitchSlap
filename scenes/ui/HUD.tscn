@@ -176,3 +176,30 @@ layout_mode = 2
 
 [node name="ScoreList" type="VBoxContainer" parent="Root/ScoreboardPanel/ScoreboardVBox"]
 layout_mode = 2
+
+[node name="ChargePanel" type="Control" parent="Root"]
+visible = false
+layout_mode = 1
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -120.0
+offset_top = -160.0
+offset_right = 120.0
+offset_bottom = -136.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+
+[node name="ChargeBar" type="ProgressBar" parent="Root/ChargePanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+max_value = 1.0
+value = 0.0
+show_percentage = false
+mouse_filter = 2

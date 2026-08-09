@@ -19,7 +19,7 @@ signal player_joined(peer_id: int)
 signal player_left(peer_id: int)
 
 const DEFAULT_PORT: int = 7777
-const MAX_PLAYERS: int = 16
+const MAX_PLAYERS: int = 32
 
 var is_online: bool = false
 

@@ -42,6 +42,11 @@ func _process(delta: float) -> void:
 	if _cooldown_remaining > 0.0:
 		_cooldown_remaining -= delta
 
+## Called every frame by WeaponManager whether or not fire is held.
+## Override in subclasses for charge-up logic (see Railgun.gd).
+func tick(_delta: float, _fire_held: bool) -> void:
+	pass
+
 func can_fire() -> bool:
 	return _cooldown_remaining <= 0.0
 

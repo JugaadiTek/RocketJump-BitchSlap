@@ -10,6 +10,15 @@ extends CanvasLayer
 @onready var kills_label: Label = $Root/KillsPanel/KillsLabel
 @onready var scoreboard_panel: PanelContainer = $Root/ScoreboardPanel
 @onready var score_list: VBoxContainer = $Root/ScoreboardPanel/ScoreboardVBox/ScoreList
+@onready var charge_bar: ProgressBar = $Root/ChargePanel/ChargeBar
+@onready var charge_panel: Control = $Root/ChargePanel
+
+func update_charge_bar(charge: float, visible_flag: bool) -> void:
+	charge_panel.visible = visible_flag
+	if visible_flag:
+		charge_bar.value = clamp(charge, 0.0, 1.0)
+		# Cyan at low charge, white at full — matches railgun beam color
+		charge_bar.modulate = Color(0.4, 0.9, 1.0).lerp(Color(1.0, 1.0, 1.0), charge)
 
 func update_kills(kills: int) -> void:
 	kills_label.text = "Kills: %d" % kills

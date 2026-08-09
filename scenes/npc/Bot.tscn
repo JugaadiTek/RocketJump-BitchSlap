@@ -1,14 +1,7 @@
-[gd_scene format=3 uid="uid://erd58ceclsnq"]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="PackedScene" path="res://scenes/player/Player.tscn" id="1"]
-[ext_resource type="Script" uid="uid://d0y0r8jcuxaci" path="res://scripts/ai/Bot.gd" id="2"]
+[ext_resource type="Script" path="res://scripts/ai/Bot.gd" id="2"]
 
-[node name="Bot" unique_id=2061047300 instance=ExtResource("1")]
+[node name="Bot" instance=ExtResource("1")]
 script = ExtResource("2")
-sight_range = 55.0
-max_turn_speed_degrees = 220.0
-wander_interval = 5.0
-retarget_interval = 0.25
-preferred_combat_range_min = 8.0
-preferred_combat_range_max = 24.0
-fire_angle_tolerance_degrees = 7.0
