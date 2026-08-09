@@ -36,6 +36,24 @@ extends CharacterBody3D
 @export var ground_stick_accel: float = 45.0
 @export var impulse_grace_duration: float = 2.0
 
+@export_group("Free Flight")
+## Once you're further than ground_stick_range from any surface - typically
+## right after a rocket-jump, melee launch, or jump pad send you flying -
+## movement input steers using the CAMERA's full 3D orientation (so looking
+## up and holding W actually pitches your trajectory upward) instead of the
+## ground-relative tangent-plane movement used the rest of the time, and
+## with noticeably stronger control authority so a mid-air correction is
+## actually meaningful over a multi-second flight between planets.
+@export var free_flight_accel: float = 22.0
+@export var free_flight_wish_speed: float = 16.0
+@export var free_flight_speed_cap: float = 32.0
+
+@export_group("Arena Bounds")
+## How hard you get shoved back toward the nearest planet when you cross
+## GravityManager.ARENA_BOUNDARY_RADIUS - see ArenaBoundary.gd for the
+## matching visual shell.
+@export var boundary_push_speed: float = 40.0
+
 @export_group("Look")
 @export var mouse_sensitivity: float = 0.0025
 @export var pitch_limit_degrees: float = 89.0
@@ -152,6 +170,7 @@ func _physics_process(delta: float) -> void:
 		_impulse_grace_remaining -= delta
 	else:
 		_apply_ground_stick(delta)
+	_apply_arena_bounds()
 
 	_apply_aim(delta)
 	_apply_look(delta)
@@ -182,6 +201,29 @@ func _apply_ground_stick(delta: float) -> void:
 	if to_center.length_squared() < 0.0001:
 		return
 	velocity += to_center.normalized() * ground_stick_accel * delta
+
+## Distance from the nearest planet's surface, or INF if there's no body at
+## all (shouldn't happen in this arena, but keeps callers safe).
+func _distance_to_nearest_surface() -> float:
+	var body: OrbitalBody = GravityManager.get_nearest_body(global_position)
+	if body == null or body.is_shattered:
+		return INF
+	return global_position.distance_to(body.global_position) - body.radius
+
+## Hard edge of the arena (see GravityManager.ARENA_BOUNDARY_RADIUS): being
+## flung out this far - deliberately, by a huge rocket-jump/melee chain, or
+## otherwise - firmly redirects you back toward whatever planet is nearest
+## instead of letting you drift out of the playable space entirely.
+func _apply_arena_bounds() -> void:
+	if global_position.length() <= GravityManager.ARENA_BOUNDARY_RADIUS:
+		return
+	var body: OrbitalBody = GravityManager.get_nearest_body(global_position)
+	var target: Vector3 = body.global_position if body else Vector3.ZERO
+	var dir: Vector3 = target - global_position
+	if dir.length_squared() < 0.0001:
+		return
+	velocity = dir.normalized() * boundary_push_speed
+	_impulse_grace_remaining = max(_impulse_grace_remaining, impulse_grace_duration)
 
 ## Right-click ADS: smoothly zooms the camera FOV and (via _apply_look)
 ## drops mouse sensitivity to match, like a standard FPS aim-down-sights.
@@ -228,20 +270,19 @@ func _apply_look(_delta: float) -> void:
 	head.rotation.x = clamp(head.rotation.x - look.y * sensitivity, -pitch_limit, pitch_limit)
 
 func _apply_movement(up: Vector3, delta: float) -> void:
-	var forward: Vector3 = -global_transform.basis.z
-	var right: Vector3 = global_transform.basis.x
-
 	var move_axis: Vector2 = _get_move_axis()
 	if move_axis.length() > 1.0:
 		move_axis = move_axis.normalized()
-	var wish_dir: Vector3 = (forward * move_axis.y + right * move_axis.x)
-	if wish_dir.length_squared() > 0.0001:
-		wish_dir = wish_dir.normalized()
-
-	var vel_up: float = velocity.dot(up)
-	var vel_horizontal: Vector3 = velocity - up * vel_up
 
 	if is_on_floor():
+		var forward: Vector3 = -global_transform.basis.z
+		var right: Vector3 = global_transform.basis.x
+		var wish_dir: Vector3 = (forward * move_axis.y + right * move_axis.x)
+		if wish_dir.length_squared() > 0.0001:
+			wish_dir = wish_dir.normalized()
+
+		var vel_up: float = velocity.dot(up)
+		var vel_horizontal: Vector3 = velocity - up * vel_up
 		vel_horizontal = _apply_friction(vel_horizontal, ground_friction, delta)
 		vel_horizontal = _q3_accelerate(wish_dir, max_ground_speed, ground_accel, vel_horizontal, delta)
 		if _wants_jump():
@@ -251,14 +292,34 @@ func _apply_movement(up: Vector3, delta: float) -> void:
 			# toward zero) doesn't produce an absurd launch speed.
 			var g_mag: float = max(current_gravity.length(), 4.0)
 			vel_up = sqrt(2.0 * g_mag * jump_height)
+		vel_up += current_gravity.dot(up) * delta
+		velocity = vel_horizontal + up * vel_up
+	elif _distance_to_nearest_surface() > ground_stick_range:
+		# Free flight: far enough from any surface that ground-stick isn't
+		# holding you (typically mid rocket-jump/melee-launch/jump-pad arc,
+		# or just drifting in open space). Steer with full 3D camera
+		# orientation instead of ground-relative tangent movement, and with
+		# stronger authority, so you can meaningfully redirect the flight.
+		var free_forward: Vector3 = -camera.global_transform.basis.z
+		var free_right: Vector3 = camera.global_transform.basis.x
+		var wish_dir_3d: Vector3 = (free_forward * move_axis.y + free_right * move_axis.x)
+		if wish_dir_3d.length_squared() > 0.0001:
+			wish_dir_3d = wish_dir_3d.normalized()
+		velocity = _q3_air_accelerate(wish_dir_3d, free_flight_wish_speed, free_flight_accel, free_flight_speed_cap, velocity, delta)
+		velocity += current_gravity * delta
 	else:
+		var forward: Vector3 = -global_transform.basis.z
+		var right: Vector3 = global_transform.basis.x
+		var wish_dir: Vector3 = (forward * move_axis.y + right * move_axis.x)
+		if wish_dir.length_squared() > 0.0001:
+			wish_dir = wish_dir.normalized()
+
+		var vel_up: float = velocity.dot(up)
+		var vel_horizontal: Vector3 = velocity - up * vel_up
 		vel_horizontal = _q3_air_accelerate(wish_dir, max_ground_speed, air_accel, air_speed_cap, vel_horizontal, delta)
+		vel_up += current_gravity.dot(up) * delta
+		velocity = vel_horizontal + up * vel_up
 
-	# Gravity always applies; current_gravity already points toward the pull,
-	# so its component along `up` is naturally negative (or zero in deep space).
-	vel_up += current_gravity.dot(up) * delta
-
-	velocity = vel_horizontal + up * vel_up
 	move_and_slide()
 
 func _apply_friction(vel: Vector3, friction: float, delta: float) -> Vector3:

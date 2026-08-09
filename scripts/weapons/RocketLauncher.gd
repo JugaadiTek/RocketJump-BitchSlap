@@ -2,7 +2,7 @@ class_name RocketLauncher
 extends Weapon
 
 @export var rocket_scene: PackedScene
-@export var rocket_speed: float = 16.0
+@export var rocket_speed: float = 26.0
 
 func _init() -> void:
 	weapon_name = "Rocket Launcher"

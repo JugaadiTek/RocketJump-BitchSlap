@@ -14,12 +14,12 @@ const ORBIT_DATA: Array[Dictionary] = [
 	# The central binary - always present, never shatterable.
 	{
 		"name": "Alpha", "radius": 28.0, "surface_gravity": 20.0,
-		"orbit_radius": 48.0, "orbit_speed": 0.045, "start_angle": 0.0,
+		"orbit_radius": 48.0, "orbit_speed": 0.1125, "start_angle": 0.0,
 		"can_be_shattered": false, "color": Color(0.85, 0.65, 0.25),
 	},
 	{
 		"name": "Beta", "radius": 19.0, "surface_gravity": 16.0,
-		"orbit_radius": 36.0, "orbit_speed": 0.045, "start_angle": PI,
+		"orbit_radius": 36.0, "orbit_speed": 0.1125, "start_angle": PI,
 		"can_be_shattered": false, "color": Color(0.35, 0.55, 0.85),
 	},
 	# Satellite planets - shatterable, spread far out at different orbital
@@ -27,25 +27,25 @@ const ORBIT_DATA: Array[Dictionary] = [
 	# same flat disc.
 	{
 		"name": "Ferrum", "radius": 15.0, "surface_gravity": 13.0,
-		"orbit_radius": 230.0, "orbit_speed": 0.021, "start_angle": 0.4,
+		"orbit_radius": 230.0, "orbit_speed": 0.0525, "start_angle": 0.4,
 		"orbit_axis": Vector3(0.18, 1.0, 0.05), "can_be_shattered": true,
 		"color": Color(0.75, 0.3, 0.15),
 	},
 	{
 		"name": "Verdant", "radius": 33.0, "surface_gravity": 21.0,
-		"orbit_radius": 360.0, "orbit_speed": 0.014, "start_angle": 2.6,
+		"orbit_radius": 360.0, "orbit_speed": 0.035, "start_angle": 2.6,
 		"orbit_axis": Vector3(-0.22, 1.0, 0.12), "can_be_shattered": true,
 		"color": Color(0.25, 0.7, 0.35),
 	},
 	{
 		"name": "Cobalt", "radius": 9.0, "surface_gravity": 10.0,
-		"orbit_radius": 480.0, "orbit_speed": 0.010, "start_angle": 4.4,
+		"orbit_radius": 480.0, "orbit_speed": 0.025, "start_angle": 4.4,
 		"orbit_axis": Vector3(0.05, 1.0, -0.28), "can_be_shattered": true,
 		"color": Color(0.2, 0.55, 0.8),
 	},
 	{
 		"name": "Umbra", "radius": 24.0, "surface_gravity": 18.0,
-		"orbit_radius": 610.0, "orbit_speed": 0.007, "start_angle": 1.5,
+		"orbit_radius": 610.0, "orbit_speed": 0.0175, "start_angle": 1.5,
 		"orbit_axis": Vector3(-0.12, 1.0, -0.2), "can_be_shattered": true,
 		"color": Color(0.6, 0.3, 0.75),
 	},
@@ -53,19 +53,19 @@ const ORBIT_DATA: Array[Dictionary] = [
 	# time, so they travel with it instead of around the arena center.
 	{
 		"name": "Ferrum_Moon", "radius": 4.0, "surface_gravity": 6.0,
-		"orbit_radius": 32.0, "orbit_speed": 0.13, "start_angle": 0.0,
+		"orbit_radius": 32.0, "orbit_speed": 0.325, "start_angle": 0.0,
 		"orbit_axis": Vector3(0.1, 1.0, 0.3), "can_be_shattered": true,
 		"color": Color(0.8, 0.55, 0.4), "parent": "Ferrum",
 	},
 	{
 		"name": "Verdant_Moon", "radius": 6.0, "surface_gravity": 7.0,
-		"orbit_radius": 56.0, "orbit_speed": 0.09, "start_angle": 1.8,
+		"orbit_radius": 56.0, "orbit_speed": 0.225, "start_angle": 1.8,
 		"orbit_axis": Vector3(-0.15, 1.0, 0.05), "can_be_shattered": true,
 		"color": Color(0.55, 0.8, 0.6), "parent": "Verdant",
 	},
 	{
 		"name": "Umbra_Moon", "radius": 3.5, "surface_gravity": 5.0,
-		"orbit_radius": 42.0, "orbit_speed": 0.15, "start_angle": 3.5,
+		"orbit_radius": 42.0, "orbit_speed": 0.375, "start_angle": 3.5,
 		"orbit_axis": Vector3(0.2, 1.0, -0.1), "can_be_shattered": true,
 		"color": Color(0.75, 0.6, 0.85), "parent": "Umbra",
 	},
@@ -112,7 +112,6 @@ func _build_orbital_bodies() -> void:
 	# reach a "parent" entry, _bodies_by_name already has that planet's node.
 	for data in ORBIT_DATA:
 		var body: OrbitalBody = orbital_body_scene.instantiate()
-		orbital_bodies_container.add_child(body)
 		body.name = data["name"]
 		body.radius = data["radius"]
 		body.surface_gravity = data["surface_gravity"]
@@ -125,6 +124,14 @@ func _build_orbital_bodies() -> void:
 		body.orbit_start_angle = data["start_angle"]
 		body.can_be_shattered = data["can_be_shattered"]
 		body.spin_speed = randf_range(0.02, 0.08) * (1.0 if randf() < 0.5 else -1.0)
+		# Every export above MUST be set before add_child() - add_child()
+		# triggers _ready() synchronously, and _ready() copies
+		# orbit_start_angle into its internal _orbit_angle. Setting
+		# orbit_start_angle any later would silently be ignored, and every
+		# body would start at angle 0 regardless of its intended phase
+		# (which is exactly what caused Alpha/Beta, meant to start on
+		# opposite sides, to instead start on top of each other).
+		orbital_bodies_container.add_child(body)
 		var mesh: MeshInstance3D = body.get_node("MeshInstance3D")
 		var mat: StandardMaterial3D = mesh.get_surface_override_material(0)
 		if mat:
