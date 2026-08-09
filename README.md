@@ -34,9 +34,15 @@ A Standard First Person Shooter Player Controller inspired by Quake 3 Arenas Fee
 - Basic IP Connect Multiplayer.
 
 
-IGNORE THE ATTACHED IMAGE.
-- Planets are all the same colors and size.
-  - Editing the dictionary in OrbitalBody.gd does not impact size, or color, but does impact orbital speed.
-- Players bounce too easily off of planets.
-  - Players should default to running and jumping around the spheres like one would normally run around in quake 3 arena.
-  - Only rocket jumps, jump pads or impacts from  other players should have the ability to launch players into orbit.
+### Next Steps:
+- Make the planet Buster weapon crosshairs lock on a planet in its sites, then the weapon auto navigates to that planet. 
+	- Not able to target planets that are too close... (no suicide shots).
+	- When planet is destroy it is busted apart into 2-5 smaller rogue satelites that become moons for other planets in the system.
+- Make the Bots also seek out and target each other
+	- add a random variance range to bot attack accuracy with lower and upper bounds. 
+	- for slower weapons have their shots lead the opponents movement.
+- Give The Slugs that are shot out of the slug gun a small amount of hit points, and allow them to take damage from other (non-slug) weapons.
+	- Make the slug gun fire like a slow speed automatic weapon, (hold fire button).
+
+
+
