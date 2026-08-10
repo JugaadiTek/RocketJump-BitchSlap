@@ -1,8 +1,8 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene format=3 uid="uid://cjvsabnetxk1m"]
 
-[ext_resource type="Script" path="res://scripts/ui/MainMenu.gd" id="1"]
+[ext_resource type="Script" uid="uid://d23cipujp6ke3" path="res://scripts/ui/MainMenu.gd" id="1"]
 
-[node name="MainMenu" type="Control"]
+[node name="MainMenu" type="Control" unique_id=1768587205]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -11,7 +11,7 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1")
 
-[node name="CenterContainer" type="CenterContainer" parent="."]
+[node name="CenterContainer" type="CenterContainer" parent="." unique_id=150433059]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -19,53 +19,52 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer"]
+[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer" unique_id=1254789996]
+custom_minimum_size = Vector2(320, 0)
 layout_mode = 2
 theme_override_constants/separation = 12
-custom_minimum_size = Vector2(320, 0)
 
-[node name="Title" type="Label" parent="CenterContainer/VBoxContainer"]
+[node name="Title" type="Label" parent="CenterContainer/VBoxContainer" unique_id=125192013]
 layout_mode = 2
-horizontal_alignment = 1
 theme_override_font_sizes/font_size = 28
 text = "RocketJump BitchSlap"
+horizontal_alignment = 1
 
-[node name="OfflineButton" type="Button" parent="CenterContainer/VBoxContainer"]
+[node name="OfflineButton" type="Button" parent="CenterContainer/VBoxContainer" unique_id=624375021]
 layout_mode = 2
 text = "Play Offline (vs Bots)"
 
-[node name="HostButton" type="Button" parent="CenterContainer/VBoxContainer"]
+[node name="HostButton" type="Button" parent="CenterContainer/VBoxContainer" unique_id=2031972028]
 layout_mode = 2
 text = "Host Game"
 
-[node name="JoinRow" type="HBoxContainer" parent="CenterContainer/VBoxContainer"]
+[node name="JoinRow" type="HBoxContainer" parent="CenterContainer/VBoxContainer" unique_id=672939936]
 layout_mode = 2
 
-[node name="IpField" type="LineEdit" parent="CenterContainer/VBoxContainer/JoinRow"]
+[node name="IpField" type="LineEdit" parent="CenterContainer/VBoxContainer/JoinRow" unique_id=1812605590]
 layout_mode = 2
 size_flags_horizontal = 3
-placeholder_text = "127.0.0.1"
 text = "127.0.0.1"
+placeholder_text = "127.0.0.1"
 
-[node name="JoinButton" type="Button" parent="CenterContainer/VBoxContainer/JoinRow"]
+[node name="JoinButton" type="Button" parent="CenterContainer/VBoxContainer/JoinRow" unique_id=1636451124]
 layout_mode = 2
 text = "Join"
 
-[node name="PortRow" type="HBoxContainer" parent="CenterContainer/VBoxContainer"]
+[node name="PortRow" type="HBoxContainer" parent="CenterContainer/VBoxContainer" unique_id=426890960]
 layout_mode = 2
 
-[node name="PortLabel" type="Label" parent="CenterContainer/VBoxContainer/PortRow"]
+[node name="PortLabel" type="Label" parent="CenterContainer/VBoxContainer/PortRow" unique_id=531004662]
 layout_mode = 2
 text = "Port"
 
-[node name="PortField" type="LineEdit" parent="CenterContainer/VBoxContainer/PortRow"]
+[node name="PortField" type="LineEdit" parent="CenterContainer/VBoxContainer/PortRow" unique_id=1517177906]
 layout_mode = 2
 size_flags_horizontal = 3
-placeholder_text = "7777"
 text = "7777"
+placeholder_text = "7777"
 
-[node name="StatusLabel" type="Label" parent="CenterContainer/VBoxContainer"]
+[node name="StatusLabel" type="Label" parent="CenterContainer/VBoxContainer" unique_id=902238840]
 layout_mode = 2
 horizontal_alignment = 1
 autowrap_mode = 2
-text = ""

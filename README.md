@@ -1,5 +1,5 @@
 # RocketJump-BitchSlap
-- **GODOT Version:** `4.7`
+- **GODOT Version:** `4.7.1`
 
 ## Overview
 This is a Video Game Concept Prototype project built in Godot.
