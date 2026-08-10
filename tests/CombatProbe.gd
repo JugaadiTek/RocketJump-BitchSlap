@@ -49,7 +49,6 @@ func _ready() -> void:
 	_test_headshot()
 	await _test_boundary()
 	await _test_death()
-	await _test_slime()
 	await _test_asteroids()
 	get_tree().quit()
 
@@ -190,29 +189,6 @@ func _test_death() -> void:
 			stains += 1
 	_log("DEATH   burst=%d comic labels=%d skull sprites=%d giblets=%d blood emitters=%d ground splatter=%d" % [
 		bursts, labels, sprites, giblets, particles, stains])
-
-func _test_slime() -> void:
-	var before: int = _count_quads(_body)
-	var scene: PackedScene = load("res://scenes/weapons/Slug.tscn")
-	var slug: Slug = scene.instantiate()
-	get_tree().current_scene.add_child(slug)
-	var out: Vector3 = Vector3(0.5, 0.7, 0.2).normalized()
-	slug.global_position = _body.global_position + out * (_body.radius + 4.0)
-	slug.launch(-out * 12.0, null)
-	for i in range(300):
-		await get_tree().physics_frame
-	var after: int = _count_quads(_body)
-	_log("SLIME   slug left %d patches on %s in 5s (lifetime %.0fs)" % [
-		after - before, _body.name, slug.slime_lifetime if is_instance_valid(slug) else 30.0])
-	if is_instance_valid(slug):
-		slug.queue_free()
-
-func _count_quads(body: Node) -> int:
-	var n: int = 0
-	for child in body.get_children():
-		if child is MeshInstance3D and child.mesh is QuadMesh:
-			n += 1
-	return n
 
 func _test_asteroids() -> void:
 	var field: DebrisField = _arena.get_node_or_null("DebrisField")

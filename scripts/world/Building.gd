@@ -47,6 +47,10 @@ const MAX_CURVE_SEGMENTS: int = 5
 var _body: StaticBody3D
 var _tint: Color = Color.WHITE
 var _demolished: bool = false
+## All of a building's visible geometry is welded into ONE mesh here while
+## _build() runs, then committed as a single MeshInstance3D.
+var _surface: SurfaceTool = null
+var _shell: MeshInstance3D = null
 
 func _ready() -> void:
 	_body = StaticBody3D.new()
@@ -54,7 +58,29 @@ func _ready() -> void:
 	_body.collision_mask = 0
 	add_child(_body)
 	_tint = Color(randf_range(0.38, 0.72), randf_range(0.38, 0.72), randf_range(0.40, 0.75))
+	_surface = SurfaceTool.new()
+	_surface.begin(Mesh.PRIMITIVE_TRIANGLES)
 	_build()
+	_commit_shell()
+
+## Welds every piece into one mesh with one material.
+##
+## Wrapping buildings onto the sphere splits each authored piece into up to 25
+## sub-boxes, and giving every one its own MeshInstance3D and its own
+## StandardMaterial3D meant 13 buildings became ~1000 nodes and ~1000
+## un-shareable materials - three quarters of the frame's draw calls, with no
+## batching possible because no two pieces shared a material. Per-piece colour
+## survives as vertex colour, so the merge costs nothing visually.
+func _commit_shell() -> void:
+	_surface.index()
+	_shell = MeshInstance3D.new()
+	_shell.mesh = _surface.commit()
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.roughness = 0.85
+	_shell.material_override = mat
+	add_child(_shell)
+	_surface = null
 
 func _build() -> void:
 	pass # override
@@ -99,6 +125,7 @@ func demolish() -> void:
 	for child in get_children():
 		if child is MeshInstance3D or child is OmniLight3D or child is Ladder:
 			child.queue_free()
+	_shell = null
 
 func is_demolished() -> bool:
 	return _demolished
@@ -126,9 +153,13 @@ func _spawn_rubble() -> void:
 	debris.emitting = true
 	debris.local_coords = false
 
-	# A flattened footprint left behind, so the site still reads as cover.
+	# A flattened footprint left behind, so the site still reads as cover. Built
+	# as its own small mesh because the merged shell has just been freed.
 	var fp: float = footprint_radius() * 0.7
+	_surface = SurfaceTool.new()
+	_surface.begin(Mesh.PRIMITIVE_TRIANGLES)
 	_add_box(Vector3(0.0, 0.35, 0.0), Vector3(fp, 0.7, fp), _tint * 0.6)
+	_commit_shell()
 
 ## Tallest point above the surface, used to work out when two planets have
 ## brought their structures into contact (see GravityManager).
@@ -167,16 +198,7 @@ func _segments_for(extent: float) -> int:
 
 func _emit_piece(pos: Vector3, size: Vector3, color: Color, solid: bool) -> void:
 	var xform: Transform3D = _surface_transform(pos)
-	var mi := MeshInstance3D.new()
-	add_child(mi)
-	var bm := BoxMesh.new()
-	bm.size = size
-	mi.mesh = bm
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = color
-	mat.roughness = 0.85
-	mi.material_override = mat
-	mi.transform = xform
+	_append_box(xform, size, color)
 	if not solid:
 		return
 	var cshape := CollisionShape3D.new()
@@ -185,6 +207,33 @@ func _emit_piece(pos: Vector3, size: Vector3, color: Color, solid: bool) -> void
 	cshape.shape = box
 	cshape.transform = xform
 	_body.add_child(cshape)
+
+## Writes one transformed box into the shared surface. Each face is emitted as
+## its own quad with its own normal, so the result stays flat-shaded and matches
+## the faceted planets rather than smearing normals across the corners.
+func _append_box(xform: Transform3D, size: Vector3, color: Color) -> void:
+	if _surface == null:
+		return
+	var h: Vector3 = size * 0.5
+	var faces: Array = [
+		[Vector3(1, 0, 0), Vector3(h.x, -h.y, -h.z), Vector3(h.x, -h.y, h.z), Vector3(h.x, h.y, h.z), Vector3(h.x, h.y, -h.z)],
+		[Vector3(-1, 0, 0), Vector3(-h.x, -h.y, h.z), Vector3(-h.x, -h.y, -h.z), Vector3(-h.x, h.y, -h.z), Vector3(-h.x, h.y, h.z)],
+		[Vector3(0, 1, 0), Vector3(-h.x, h.y, -h.z), Vector3(h.x, h.y, -h.z), Vector3(h.x, h.y, h.z), Vector3(-h.x, h.y, h.z)],
+		[Vector3(0, -1, 0), Vector3(-h.x, -h.y, h.z), Vector3(h.x, -h.y, h.z), Vector3(h.x, -h.y, -h.z), Vector3(-h.x, -h.y, -h.z)],
+		[Vector3(0, 0, 1), Vector3(-h.x, -h.y, h.z), Vector3(-h.x, h.y, h.z), Vector3(h.x, h.y, h.z), Vector3(h.x, -h.y, h.z)],
+		[Vector3(0, 0, -1), Vector3(h.x, -h.y, -h.z), Vector3(h.x, h.y, -h.z), Vector3(-h.x, h.y, -h.z), Vector3(-h.x, -h.y, -h.z)],
+	]
+	for face in faces:
+		var normal: Vector3 = (xform.basis * face[0]).normalized()
+		var a: Vector3 = xform * face[1]
+		var b: Vector3 = xform * face[2]
+		var c: Vector3 = xform * face[3]
+		var d: Vector3 = xform * face[4]
+		for tri in [[a, b, c], [a, c, d]]:
+			for v in tri:
+				_surface.set_color(color)
+				_surface.set_normal(normal)
+				_surface.add_vertex(v)
 
 ## Maps a position authored on a flat tangent plane onto the actual sphere.
 ##
@@ -309,26 +358,12 @@ func _add_ladder(xz: Vector2, from_y: float, to_y: float, shaft: float) -> void:
 	# and solid rungs would just snag the player against the shaft wall.
 	var rail_offset: float = shaft * 0.28
 	for side in [-1.0, 1.0]:
-		var rail := MeshInstance3D.new()
-		add_child(rail)
-		var rail_mesh := BoxMesh.new()
-		rail_mesh.size = Vector3(0.09, height, 0.09)
-		rail.mesh = rail_mesh
-		var rail_mat := StandardMaterial3D.new()
-		rail_mat.albedo_color = rung_color
-		rail.material_override = rail_mat
-		rail.position = Vector3(xz.x + rail_offset * side, from_y + height * 0.5, xz.y)
+		_add_box(Vector3(xz.x + rail_offset * side, from_y + height * 0.5, xz.y),
+			Vector3(0.09, height, 0.09), rung_color, false)
 	var rung_count: int = int(height / 0.4)
 	for i in range(rung_count):
-		var rung := MeshInstance3D.new()
-		add_child(rung)
-		var rung_mesh := BoxMesh.new()
-		rung_mesh.size = Vector3(rail_offset * 2.0, 0.06, 0.06)
-		rung.mesh = rung_mesh
-		var rung_mat := StandardMaterial3D.new()
-		rung_mat.albedo_color = rung_color
-		rung.material_override = rung_mat
-		rung.position = Vector3(xz.x, from_y + 0.4 * float(i) + 0.2, xz.y)
+		_add_box(Vector3(xz.x, from_y + 0.4 * float(i) + 0.2, xz.y),
+			Vector3(rail_offset * 2.0, 0.06, 0.06), rung_color, false)
 
 	var zone := Ladder.new()
 	add_child(zone)

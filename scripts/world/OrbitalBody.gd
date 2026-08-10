@@ -273,6 +273,8 @@ func _rebuild_cratered_mesh() -> void:
 func _rebuild_collider() -> void:
 	if mesh == null or mesh.mesh == null:
 		return
+	if has_meta("no_crater_collider"):
+		return  # perf probe: keep the analytic sphere so its cost can be compared
 	var faces: PackedVector3Array = mesh.mesh.get_faces()
 	if faces.is_empty():
 		return

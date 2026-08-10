@@ -22,6 +22,11 @@ var _comet: GPUParticles3D = null
 var _glow: OmniLight3D = null
 var _shape: CollisionShape3D = null
 var _mesh: MeshInstance3D = null
+## Nearest-body lookups scan every planet, and with a hundred rocks doing it
+## twice a frame that adds up fast. Rocks move slowly relative to the planets, so
+## the answer is cached and refreshed a few times a second instead.
+var _near_body: OrbitalBody = null
+var _near_refresh: float = 0.0
 
 func _ready() -> void:
 	# Layer 16: its own layer, so shots (mask 1|2|8) pass by but players still
@@ -63,6 +68,10 @@ func launch(initial_velocity: Vector3) -> void:
 	velocity = initial_velocity
 
 func _physics_process(delta: float) -> void:
+	_near_refresh -= delta
+	if _near_refresh <= 0.0:
+		_near_refresh = randf_range(0.25, 0.45)
+		_near_body = GravityManager.get_nearest_body(global_position)
 	velocity += GravityManager.get_gravity_at(global_position) * delta
 	rotate_x(_spin.x * delta)
 	rotate_y(_spin.y * delta)
@@ -77,7 +86,7 @@ func _physics_process(delta: float) -> void:
 ## Lights the rock up once it is genuinely committed to hitting something, so an
 ## incoming strike telegraphs itself rather than arriving out of nowhere.
 func _update_comet() -> void:
-	var body: OrbitalBody = GravityManager.get_nearest_body(global_position)
+	var body: OrbitalBody = _near_body if is_instance_valid(_near_body) else null
 	var incoming: bool = false
 	if body != null:
 		var to_surface: Vector3 = body.global_position - global_position

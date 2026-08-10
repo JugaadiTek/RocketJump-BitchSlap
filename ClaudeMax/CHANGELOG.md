@@ -7,6 +7,81 @@ in [`tests/`](../tests) — see **Test harness** at the bottom.
 
 ---
 
+## 2026-08-11 — Session 6: sound reverted, slime removed, performance pass
+
+### Reverted: all sound
+Removed on request — the `Sfx`, `Ambience` and `Announcer` autoloads, every
+`play_3d`/`play_ui`/`announce` call site, the HUD announcement banner, and the
+three autoload registrations. The game launches clean again (MainMenu 3.3 s,
+Arena 5.0 s wall clock, no errors).
+
+Worth recording for whenever sound is attempted again: **that system synthesised
+every sample on the main thread during autoload `_ready()`**, before the first
+frame could be drawn. Roughly 30M GDScript loop iterations of oscillator, filter
+and reverb maths — 21 effects plus four 8-second ambience beds at 44.1 kHz.
+Arena launch measured 7.1 s with it and 5.0 s without. Any future version needs
+to synthesise off the startup path (a background thread, lazily on first play, or
+baked to files at build time).
+
+Also removed: **slug slime trails**.
+
+### Performance
+Measured with a real renderer (headless reports no draw calls), camera placed on
+a planet surface looking along it, cost attributed by toggling systems off.
+
+**Found and fixed:** buildings were **570 of 757 draw calls — 75% of the frame**.
+Wrapping a building onto the sphere splits each authored piece into up to 25
+sub-boxes, and each sub-box was getting its own `MeshInstance3D` *and* its own
+`StandardMaterial3D`, so 13 buildings became ~1000 nodes with ~1000
+un-shareable materials and nothing could batch.
+
+Every building's geometry is now welded into a single mesh with one material via
+`SurfaceTool`, with per-piece colour carried as vertex colour so it looks
+identical. Faces are still emitted individually to keep the flat shading that
+matches the faceted planets. Ladder rails and rungs fold into the same mesh.
+
+| | before | after |
+|---|---|---|
+| draw calls (on a planet) | 757 | **217** |
+| ...from buildings | 570 | **33** |
+| scene nodes | 3780 | **2828** |
+
+Asteroids also stopped calling `GravityManager.get_nearest_body()` twice per
+frame each — the result is cached and refreshed a few times a second, since a
+rock barely moves relative to a planet between frames.
+
+**Not reproduced: any actual slowdown.** Sustained 20 s sample with all 31 bots
+fighting, dying and respawning:
+
+```
+mean 8.33ms (120 fps)   p95 9.09ms   worst 16.24ms   spikes >20ms: 0 / 2400 frames
+```
+
+That is the 120 Hz display cap with headroom to spare, and stripping the scene to
+nothing still measures ~8.4 ms — so scene content is not the limiter. Load is
+171 ms total (127 ms building the arena). A crater costs 1.9 ms to deform plus
+1.2 ms to rebuild the collider, coalesced on a 0.6 s timer.
+
+If the game feels slow in play, it is not the steady-state frame on this machine
+— the likely candidates are running from inside the editor (much slower than a
+standalone run) or something specific to a viewpoint, and either needs a report
+of what is actually being seen.
+
+### Test harness
+`tests/PerfProbe.tscn` (draw calls, frame spikes, cost attribution by mode) and
+`tests/LoadProbe.tscn` (scene build breakdown). **Both must run with a real
+renderer — no `--headless`**:
+
+```
+/Applications/Godot.app/Contents/MacOS/Godot --path . res://tests/PerfProbe.tscn -- sustained
+/Applications/Godot.app/Contents/MacOS/Godot --path . res://tests/LoadProbe.tscn
+```
+
+Modes: `all`, `sustained`, `no-asteroids`, `no-buildings`, `no-lights`,
+`no-packs`, `sphere-colliders`, `no-players`, `bare`.
+
+---
+
 ## 2026-08-11 — Session 5: combat feel, gore, physical asteroids, adaptive audio
 
 ### Bugs
