@@ -120,7 +120,7 @@ func _predict_target_pos(dist_to_target: float) -> Vector3:
 	if _ai_weapon_index == 1:
 		return _target.global_position  ## hitscan, no lead needed
 	var time_to_hit: float = dist_to_target / max(weapon_speed, 1.0)
-	return _target.global_position + _target.velocity * time_to_hit
+	return _target.global_position + _target.get_world_velocity() * time_to_hit
 
 func _do_wander(_delta: float) -> void:
 	_wander_timer -= _delta
@@ -194,6 +194,7 @@ func _steer_toward(desired_dir: Vector3, delta: float) -> void:
 func _get_move_axis() -> Vector2: return _ai_move_axis
 func _get_look_delta() -> Vector2: return Vector2.ZERO
 func _wants_jump() -> bool: return _ai_wants_jump
+func _wants_descend() -> bool: return false
 func _wants_fire() -> bool: return _ai_wants_fire
 func _wants_aim() -> bool: return false
 func _wants_scoreboard() -> bool: return false

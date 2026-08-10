@@ -64,6 +64,12 @@ func fire(muzzle_transform: Transform3D, aim_direction: Vector3) -> bool:
 func _do_fire(_muzzle_transform: Transform3D, _aim_direction: Vector3) -> void:
 	pass # override
 
+## Called by WeaponManager when this weapon stops being the active one. Only
+## the active weapon gets ticked, so anything with persistent world state needs
+## to unwind it here (see GrapplingHook).
+func on_holster() -> void:
+	pass # override
+
 ## Finds (or lazily creates) the shared container new projectiles get parented
 ## under, so they don't end up nested inside the firing player (which would
 ## drag them along when the player moves/dies/respawns).

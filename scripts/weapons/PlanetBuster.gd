@@ -1,8 +1,11 @@
 class_name PlanetBuster
 extends Weapon
-## Hold fire while aiming at a planet to lock on. The shell is then auto-
-## guided to that planet. Cannot lock planets that are too close (min_lock_
-## distance) to prevent point-blank suicides.
+## Hold fire while aiming at a planet to lock on. Nothing leaves the barrel
+## without a lock - can_fire() gates on it, so an unlocked trigger pull neither
+## fires nor consumes this single-use weapon. Once locked, the shell leaves
+## slowly and accelerates toward the planet, re-aiming once a second (see
+## PlanetBusterProjectile). Cannot lock planets that are too close
+## (min_lock_distance) to prevent point-blank suicides.
 
 @export var shell_scene: PackedScene
 @export var shell_speed: float = 7.0

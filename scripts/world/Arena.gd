@@ -10,62 +10,83 @@ extends Node3D
 ## hand-placed, so tuning a planet is a one-line data change instead of
 ## editing a scene tree.
 
+## Every orbit radius here is sized against GravityManager.ARENA_BOUNDARY_RADIUS
+## (665). Bodies are spaced so that no two adjacent orbits can bring their
+## surfaces - or a moon at full extension - into contact even when their phases
+## line up: check `gap between orbit radii > sum of the two radii` before moving
+## anything, and remember a moon adds (its orbit_radius + its radius) to how far
+## its parent reaches.
+##
+## Sizes deliberately span a wide range, from 5m pebbles you can run around in
+## seconds up to a 44m world, so fights on different planets feel different.
 const ORBIT_DATA: Array[Dictionary] = [
-	# The central binary - always present, never shatterable.
+	# The central binary - always present, never shatterable. Same orbit_speed
+	# and opposite start angles keep them locked on opposite sides forever.
 	{
-		"name": "Alpha", "radius": 28.0, "surface_gravity": 20.0,
-		"orbit_radius": 48.0, "orbit_speed": 0.1125, "start_angle": 0.0,
+		"name": "Alpha", "radius": 28.0, "surface_gravity": 19.0,
+		"orbit_radius": 34.0, "orbit_speed": 0.1125, "start_angle": 0.0,
 		"can_be_shattered": false, "color": Color(0.85, 0.65, 0.25),
 	},
 	{
-		"name": "Beta", "radius": 19.0, "surface_gravity": 16.0,
-		"orbit_radius": 36.0, "orbit_speed": 0.1125, "start_angle": PI,
+		"name": "Beta", "radius": 13.0, "surface_gravity": 11.0,
+		"orbit_radius": 25.0, "orbit_speed": 0.1125, "start_angle": PI,
 		"can_be_shattered": false, "color": Color(0.35, 0.55, 0.85),
 	},
-	# Satellite planets - shatterable, spread far out at different orbital
-	# radii and tilted orbital planes so they don't all sweep through the
-	# same flat disc.
+	# Satellite planets - shatterable, spread out at different orbital radii and
+	# tilted orbital planes so they don't all sweep through the same flat disc.
 	{
-		"name": "Ferrum", "radius": 15.0, "surface_gravity": 13.0,
-		"orbit_radius": 230.0, "orbit_speed": 0.0525, "start_angle": 0.4,
+		"name": "Ferrum", "radius": 7.0, "surface_gravity": 8.0,
+		"orbit_radius": 115.0, "orbit_speed": 0.0525, "start_angle": 0.4,
 		"orbit_axis": Vector3(0.18, 1.0, 0.05), "can_be_shattered": true,
 		"color": Color(0.75, 0.3, 0.15),
 	},
 	{
-		"name": "Verdant", "radius": 33.0, "surface_gravity": 21.0,
-		"orbit_radius": 360.0, "orbit_speed": 0.035, "start_angle": 2.6,
+		"name": "Cinder", "radius": 18.0, "surface_gravity": 14.0,
+		"orbit_radius": 185.0, "orbit_speed": 0.042, "start_angle": 5.5,
+		"orbit_axis": Vector3(0.24, 1.0, -0.14), "can_be_shattered": true,
+		"color": Color(0.8, 0.45, 0.2),
+	},
+	{
+		"name": "Verdant", "radius": 44.0, "surface_gravity": 26.0,
+		"orbit_radius": 275.0, "orbit_speed": 0.035, "start_angle": 2.6,
 		"orbit_axis": Vector3(-0.22, 1.0, 0.12), "can_be_shattered": true,
 		"color": Color(0.25, 0.7, 0.35),
 	},
 	{
-		"name": "Cobalt", "radius": 9.0, "surface_gravity": 10.0,
-		"orbit_radius": 480.0, "orbit_speed": 0.025, "start_angle": 4.4,
+		"name": "Cobalt", "radius": 5.0, "surface_gravity": 6.0,
+		"orbit_radius": 375.0, "orbit_speed": 0.025, "start_angle": 4.4,
 		"orbit_axis": Vector3(0.05, 1.0, -0.28), "can_be_shattered": true,
 		"color": Color(0.2, 0.55, 0.8),
 	},
 	{
-		"name": "Umbra", "radius": 24.0, "surface_gravity": 18.0,
-		"orbit_radius": 610.0, "orbit_speed": 0.0175, "start_angle": 1.5,
+		"name": "Umbra", "radius": 27.0, "surface_gravity": 18.0,
+		"orbit_radius": 460.0, "orbit_speed": 0.0175, "start_angle": 1.5,
 		"orbit_axis": Vector3(-0.12, 1.0, -0.2), "can_be_shattered": true,
 		"color": Color(0.6, 0.3, 0.75),
+	},
+	{
+		"name": "Halcyon", "radius": 36.0, "surface_gravity": 22.0,
+		"orbit_radius": 570.0, "orbit_speed": 0.014, "start_angle": 3.7,
+		"orbit_axis": Vector3(0.15, 1.0, 0.22), "can_be_shattered": true,
+		"color": Color(0.85, 0.8, 0.55),
 	},
 	# Moons - orbit_pivot resolves to their parent's OrbitalBody at build
 	# time, so they travel with it instead of around the arena center.
 	{
-		"name": "Ferrum_Moon", "radius": 4.0, "surface_gravity": 6.0,
-		"orbit_radius": 32.0, "orbit_speed": 0.325, "start_angle": 0.0,
+		"name": "Cinder_Moon", "radius": 3.0, "surface_gravity": 4.0,
+		"orbit_radius": 40.0, "orbit_speed": 0.325, "start_angle": 0.0,
 		"orbit_axis": Vector3(0.1, 1.0, 0.3), "can_be_shattered": true,
-		"color": Color(0.8, 0.55, 0.4), "parent": "Ferrum",
+		"color": Color(0.8, 0.55, 0.4), "parent": "Cinder",
 	},
 	{
 		"name": "Verdant_Moon", "radius": 6.0, "surface_gravity": 7.0,
-		"orbit_radius": 56.0, "orbit_speed": 0.225, "start_angle": 1.8,
+		"orbit_radius": 80.0, "orbit_speed": 0.225, "start_angle": 1.8,
 		"orbit_axis": Vector3(-0.15, 1.0, 0.05), "can_be_shattered": true,
 		"color": Color(0.55, 0.8, 0.6), "parent": "Verdant",
 	},
 	{
-		"name": "Umbra_Moon", "radius": 3.5, "surface_gravity": 5.0,
-		"orbit_radius": 42.0, "orbit_speed": 0.375, "start_angle": 3.5,
+		"name": "Umbra_Moon", "radius": 4.0, "surface_gravity": 5.0,
+		"orbit_radius": 54.0, "orbit_speed": 0.375, "start_angle": 3.5,
 		"orbit_axis": Vector3(0.2, 1.0, -0.1), "can_be_shattered": true,
 		"color": Color(0.75, 0.6, 0.85), "parent": "Umbra",
 	},
@@ -84,6 +105,7 @@ const SPAWNS_PER_BODY: int = 4
 @export var jump_pad_scene: PackedScene
 @export var jump_pad_bodies: Array[String] = ["Alpha", "Beta", "Ferrum", "Cobalt"]
 @export var tower_scene: PackedScene
+@export var bunker_scene: PackedScene
 
 @onready var orbit_center: Node3D = $OrbitCenter
 @onready var orbital_bodies_container: Node3D = $OrbitalBodies
@@ -98,7 +120,7 @@ func _ready() -> void:
 	_build_spawn_points()
 	_build_planet_buster_pads()
 	_build_jump_pads()
-	_build_towers()
+	_build_buildings()
 
 	if NetworkManager.is_online:
 		NetworkManager.player_joined.connect(_on_player_joined)
@@ -192,20 +214,36 @@ func _build_jump_pads() -> void:
 		var basis_z: Vector3 = basis_x.cross(dir).normalized()
 		pad.transform = Transform3D(Basis(basis_x, dir, basis_z), dir * (body.radius + 0.1))
 
-func _build_towers() -> void:
-	if tower_scene == null:
-		return
+## Scatters a mix of structures over every body big enough to hold them, so
+## each planet has cover to fight around and interiors to fight through.
+## Towers go on anything sizeable; small worlds get bunkers instead, where a
+## radius-tall tower would be a stub not worth entering.
+func _build_buildings() -> void:
 	for body_name in _bodies_by_name:
 		var body: OrbitalBody = _bodies_by_name[body_name]
-		# Moons and tiny bodies skip towers (too small to be useful)
-		if body.radius < 6.0:
-			continue
-		var count: int = randi_range(0, 3)
-		for _i in range(count):
-			var tower: Node3D = tower_scene.instantiate()
-			body.add_child(tower)
-			# Orient the tower so its local +Y points radially outward from
-			# the planet surface (the planet's local "up" from any position).
+		if body.radius < 5.0:
+			continue  # moons and pebbles stay bare
+		var count: int = randi_range(1, 3) if body.radius >= 15.0 else 1
+		for i in range(count):
+			var prefer_tower: bool = body.radius >= 12.0 and (i == 0 or randf() < 0.6)
+			var scene: PackedScene = tower_scene if prefer_tower else bunker_scene
+			if scene == null:
+				scene = tower_scene if tower_scene else bunker_scene
+			if scene == null:
+				return
+			var building: Node3D = scene.instantiate()
+			# Every export MUST be set before add_child(): add_child() runs
+			# _ready() synchronously and Building._ready() builds the geometry
+			# there and then, so anything assigned afterwards is ignored. That
+			# is exactly why towers used to come out a fixed 30m tall instead
+			# of matching their planet.
+			if building is Tower:
+				building.tower_height = body.radius
+				building.floor_count = maxi(2, int(body.radius / 9.0))
+				building.tower_width = clampf(body.radius * 0.28, 6.0, 11.0)
+			body.add_child(building)
+			# Orient so the building's local +Y points radially outward from the
+			# planet surface (the planet's local "up" at that spot).
 			var rand_angle: float = randf_range(0.0, TAU)
 			var polar: float = randf_range(0.2, 0.85) # avoid exact poles
 			var surface_dir := Vector3(
@@ -213,13 +251,10 @@ func _build_towers() -> void:
 				cos(polar),
 				sin(polar) * sin(rand_angle)
 			).normalized()
-			# Build a basis with Y = surface_dir
 			var ref: Vector3 = Vector3.RIGHT if abs(surface_dir.dot(Vector3.RIGHT)) < 0.9 else Vector3.FORWARD
 			var bx: Vector3 = surface_dir.cross(ref).normalized()
 			var bz: Vector3 = bx.cross(surface_dir).normalized()
-			tower.transform = Transform3D(Basis(bx, surface_dir, bz), surface_dir * body.radius)
-			tower.tower_height = body.radius
-			tower.floor_count = max(2, int(body.radius / 8.0))
+			building.transform = Transform3D(Basis(bx, surface_dir, bz), surface_dir * body.radius)
 
 func _spawn_bots() -> void:
 	if bot_scene == null:

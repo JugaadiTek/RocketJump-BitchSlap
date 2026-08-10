@@ -15,14 +15,14 @@ extends Node
 ## influence radius, so players who rocket-jump way out into open space drift
 ## slowly back toward the arena instead of floating away forever.
 const DEEP_SPACE_PULL: float = 0.6
-const DEEP_SPACE_MAX_DISTANCE: float = 750.0
+const DEEP_SPACE_MAX_DISTANCE: float = 525.0
 
 ## Hard edge of playable space, measured from the arena center (world
 ## origin). Beyond this, Player._apply_arena_bounds() fires a strong push
 ## back toward the nearest planet, and ArenaBoundary.gd's shell becomes
-## visible nearby. Comfortably past the outermost body (Umbra: orbit_radius
-## 610 + influence_radius 84 + its moon's 42 orbit_radius ~= 736 max reach).
-const ARENA_BOUNDARY_RADIUS: float = 950.0
+## visible nearby. Comfortably past the outermost body (Halcyon: orbit_radius
+## 570 + radius 36 = 606 max reach).
+const ARENA_BOUNDARY_RADIUS: float = 665.0
 
 var _bodies: Array[OrbitalBody] = []
 

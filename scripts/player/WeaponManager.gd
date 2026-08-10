@@ -38,6 +38,7 @@ func _add_starting_weapon(scene: PackedScene) -> void:
 
 func handle_input(delta: float, wants_fire: bool, switch_to_index: int, scroll_direction: int) -> void:
 	var switched: bool = false
+	var previous_index: int = _current_index
 	if switch_to_index >= 0 and switch_to_index < _weapons.size() and switch_to_index != _current_index:
 		_current_index = switch_to_index
 		switched = true
@@ -45,6 +46,11 @@ func handle_input(delta: float, wants_fire: bool, switch_to_index: int, scroll_d
 		_current_index = wrapi(_current_index + scroll_direction, 0, _weapons.size())
 		switched = true
 	if switched:
+		# Only the active weapon is ticked, so anything holding persistent state
+		# (a grappling hook mid-pull) has to be told it's been put away or it
+		# would still be attached when it comes back out.
+		if previous_index < _weapons.size():
+			_weapons[previous_index].on_holster()
 		_update_visibility()
 
 	if _weapons.is_empty():
@@ -87,6 +93,24 @@ func grant_weapon(id: String) -> void:
 	add_child(weapon)
 	_weapons.append(weapon)
 	_current_index = _weapons.size() - 1
+	_update_visibility()
+
+func get_active_weapon() -> Weapon:
+	if _weapons.is_empty():
+		return null
+	return _weapons[_current_index]
+
+## Applies a selection made elsewhere - specifically a remote peer's replicated
+## `current_weapon_index`, since handle_input() only ever runs on the authority
+## and remote players would otherwise be stuck showing weapon 0 forever.
+func set_current_index(index: int) -> void:
+	if _weapons.is_empty():
+		return
+	var clamped: int = clampi(index, 0, _weapons.size() - 1)
+	if clamped == _current_index:
+		return
+	_weapons[_current_index].on_holster()
+	_current_index = clamped
 	_update_visibility()
 
 func get_current_weapon_name() -> String:

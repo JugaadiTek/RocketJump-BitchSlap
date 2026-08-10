@@ -11,7 +11,7 @@ extends Node
 
 signal spawn_complete
 
-const SPAWN_RADIUS: float = 880.0   ## just inside ARENA_BOUNDARY_RADIUS
+const SPAWN_RADIUS: float = 615.0   ## just inside ARENA_BOUNDARY_RADIUS
 const AIM_WINDOW: float = 10.0      ## seconds to pick a planet
 const LOCK_CONE_COS: float = 0.93   ## cos(~21°) threshold for "in sights"
 const LAUNCH_SPEED: float = 130.0

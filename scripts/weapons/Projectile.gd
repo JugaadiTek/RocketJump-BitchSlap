@@ -12,6 +12,10 @@ extends CharacterBody3D
 @export var affected_by_gravity: bool = true
 @export var lifetime: float = 12.0
 @export var gravity_multiplier: float = 1.0
+## Whether the shooter's own motion is added to the muzzle velocity. Off for the
+## Planet Buster, whose whole character is a shell that leaves the barrel slowly
+## and builds up.
+@export var inherit_shooter_velocity: bool = true
 
 var owner_player: Node = null
 var _life_remaining: float
@@ -32,8 +36,14 @@ func launch(initial_velocity: Vector3, shooter: Node) -> void:
 	# shoot backwards when the player is moving fast (e.g. rocket fired while
 	# sprinting should travel forward, not arc behind the player).
 	var shooter_vel: Vector3 = Vector3.ZERO
-	if shooter and "velocity" in shooter:
-		shooter_vel = shooter.velocity
+	if inherit_shooter_velocity and shooter:
+		# get_world_velocity() rather than `velocity`: a player standing on a
+		# planet stores velocity relative to that planet's orbital frame, and a
+		# projectile lives in world space.
+		if shooter.has_method("get_world_velocity"):
+			shooter_vel = shooter.get_world_velocity()
+		elif "velocity" in shooter:
+			shooter_vel = shooter.velocity
 	velocity = initial_velocity + shooter_vel
 	owner_player = shooter
 	var dir: Vector3 = velocity.normalized() if velocity.length() > 0.01 else initial_velocity.normalized()

@@ -1,4 +1,4 @@
-[gd_scene load_steps=13 format=3]
+[gd_scene load_steps=19 format=3]
 
 [ext_resource type="Script" path="res://scripts/player/Player.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/player/WeaponManager.gd" id="2"]
@@ -10,6 +10,8 @@
 [ext_resource type="PackedScene" path="res://scenes/player/Corpse.tscn" id="8"]
 [ext_resource type="PackedScene" path="res://scenes/weapons/SpaceBoard.tscn" id="9"]
 [ext_resource type="PackedScene" path="res://scenes/weapons/GrapplingHook.tscn" id="10"]
+[ext_resource type="Script" path="res://scripts/player/HookVisual.gd" id="11"]
+[ext_resource type="Script" path="res://scripts/player/WeaponModel.gd" id="12"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_1"]
 radius = 0.4
@@ -19,9 +21,39 @@ height = 1.8
 radius = 0.4
 height = 1.8
 
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_cable"]
+albedo_color = Color(0.5, 0.42, 0.36, 1)
+emission_enabled = true
+emission = Color(0.85, 0.5, 0.15, 1)
+emission_energy_multiplier = 0.9
+roughness = 0.8
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_cable"]
+top_radius = 0.035
+bottom_radius = 0.035
+height = 1.0
+radial_segments = 6
+rings = 0
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_hook"]
+albedo_color = Color(0.85, 0.5, 0.15, 1)
+emission_enabled = true
+emission = Color(0.95, 0.55, 0.2, 1)
+emission_energy_multiplier = 2.0
+metallic = 0.7
+roughness = 0.3
+
+[sub_resource type="BoxMesh" id="BoxMesh_hook"]
+size = Vector3(0.16, 0.16, 0.3)
+
+[sub_resource type="BoxMesh" id="BoxMesh_thirdperson_gun"]
+size = Vector3(0.14, 0.16, 0.75)
+
 [node name="Player" type="CharacterBody3D"]
 collision_layer = 2
 collision_mask = 3
+floor_constant_speed = true
+floor_snap_length = 0.5
 floor_max_angle = 1.2
 script = ExtResource("1")
 
@@ -34,6 +66,11 @@ shape = SubResource("CapsuleShape3D_1")
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Model"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
 mesh = SubResource("CapsuleMesh_1")
+
+[node name="WeaponModel" type="MeshInstance3D" parent="Model"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.42, 1.15, -0.3)
+mesh = SubResource("BoxMesh_thirdperson_gun")
+script = ExtResource("12")
 
 [node name="Head" type="Node3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6, 0)
@@ -57,5 +94,20 @@ grappling_hook_scene = ExtResource("10")
 [node name="Melee" type="Node" parent="."]
 script = ExtResource("3")
 corpse_scene = ExtResource("8")
+
+[node name="HookVisual" type="Node3D" parent="."]
+script = ExtResource("11")
+
+[node name="Cable" type="MeshInstance3D" parent="HookVisual"]
+top_level = true
+visible = false
+mesh = SubResource("CylinderMesh_cable")
+surface_material_override/0 = SubResource("StandardMaterial3D_cable")
+
+[node name="HookHead" type="MeshInstance3D" parent="HookVisual"]
+top_level = true
+visible = false
+mesh = SubResource("BoxMesh_hook")
+surface_material_override/0 = SubResource("StandardMaterial3D_hook")
 
 [node name="MultiplayerSynchronizer" type="MultiplayerSynchronizer" parent="."]

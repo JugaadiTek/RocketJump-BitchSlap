@@ -35,6 +35,33 @@ extends CharacterBody3D
 @export var ground_stick_accel: float = 45.0
 @export var impulse_grace_duration: float = 2.0
 
+@export_group("Planet Frame")
+## Height above a planet's surface within which that planet becomes the
+## player's reference frame: the player is carried by its orbit and spin, and
+## `velocity` is stored relative to it. Planets here travel at up to ~12 m/s -
+## faster than max_ground_speed - so without this the surface slides out from
+## under you and the leading hemisphere behaves like a moving wall.
+@export var planet_frame_height: float = 26.0
+## The frame is only released past `planet_frame_height * this`, so a player
+## hovering right at the edge (or midway between two close bodies) doesn't
+## flip-flop between frames every frame.
+@export var planet_frame_release_ratio: float = 1.4
+
+@export_group("Ladders")
+## Inside a building's Ladder volume, movement switches to climbing along the
+## ladder's own axis: forward/back (or jump/crouch) climbs, strafe slides you
+## off onto a floor.
+@export var ladder_climb_speed: float = 4.5
+@export var ladder_lateral_speed: float = 2.5
+
+@export_group("Space Board")
+## Free-flight tuning, used while the Space Board is the selected weapon
+## (see _apply_flight_movement).
+@export var board_accel: float = 42.0
+@export var board_max_speed: float = 60.0
+@export var board_damping: float = 1.6
+@export var board_gravity_scale: float = 0.12
+
 @export_group("Arena Bounds")
 @export var boundary_launch_speed: float = 120.0
 @export var boundary_landing_slowdown: float = 22.0 ## decel applied near the target planet's surface
@@ -61,6 +88,24 @@ var current_gravity: Vector3 = Vector3.ZERO
 var last_damage_instigator_path: NodePath
 var _impulse_grace_remaining: float = 0.0
 var _boundary_target: OrbitalBody = null  # non-null while being guided back from the boundary
+## The planet whose reference frame we're currently riding, and that frame's
+## world velocity at our position. While _frame_body is set, `velocity` is
+## RELATIVE to it - use get_world_velocity() for anything that needs world space.
+var _frame_body: OrbitalBody = null
+var _platform_velocity: Vector3 = Vector3.ZERO
+## The Ladder volume we're currently standing in, if any (set by Ladder.gd).
+var _ladder: Node3D = null
+
+## Grappling cable state, written by GrapplingHook and read by HookVisual.
+## Replicated (see _setup_replication) so everyone can see who is grappling
+## what, not just the person holding the hook.
+var hook_active: bool = false
+var hook_end: Vector3 = Vector3.ZERO
+
+## Which weapon this player has out. Replicated so WeaponModel can show everyone
+## else what they're carrying - handle_input() only runs on the authority, so a
+## remote player's own WeaponManager would never switch on its own.
+var current_weapon_index: int = 0
 
 ## Identity for scoring/display - distinct from multiplayer_authority (a
 ## networking concept). Bots default to authority id 1 in offline play, same
@@ -151,19 +196,27 @@ func _physics_process(delta: float) -> void:
 		return
 
 	current_gravity = GravityManager.get_gravity_at(global_position)
-	var new_up: Vector3 = -current_gravity.normalized() if current_gravity.length() > 0.0001 else up_direction
+	_update_planet_frame(delta)
+	var new_up: Vector3 = _get_up_direction()
 	_align_body_to_up(new_up, delta)
 	up_direction = new_up
 
+	var flying: bool = _is_flight_mode()
+	var climbing: bool = _is_on_ladder() and not flying
 	if _impulse_grace_remaining > 0.0:
 		_impulse_grace_remaining -= delta
-	else:
+	elif not flying and not climbing:
 		_apply_ground_stick(delta)
 	_apply_arena_bounds()
 
 	_apply_aim(delta)
 	_apply_look(delta)
-	_apply_movement(new_up, delta)
+	if flying:
+		_apply_flight_movement(new_up, delta)
+	elif climbing:
+		_apply_ladder_movement(delta)
+	else:
+		_apply_movement(new_up, delta)
 
 	if _wants_melee():
 		melee.try_activate()
@@ -176,7 +229,7 @@ func _physics_process(delta: float) -> void:
 		hud.update_kills(MatchState.get_score(player_id))
 		hud.update_scoreboard(_wants_scoreboard(), MatchState.get_all_scores())
 		# Charge bar: visible only when the active weapon supports it
-		var active_weapon = weapon_manager._weapons[weapon_manager.get_current_index()] if not weapon_manager._weapons.is_empty() else null
+		var active_weapon: Weapon = weapon_manager.get_active_weapon()
 		if active_weapon and active_weapon.has_method("get_charge"):
 			hud.update_charge_bar(active_weapon.get_charge(), true)
 		else:
@@ -191,6 +244,84 @@ func _physics_process(delta: float) -> void:
 			pass  # Spawner calls hud.update_spawn_aim directly
 		else:
 			hud.hide_spawn_aim()
+
+## Picks the planet we're currently "on" and rides it.
+##
+## Planets in this arena orbit at up to ~12 m/s and spin on top of that, while
+## max_ground_speed is 9 - and a StaticBody3D that is teleported each frame
+## gives CharacterBody3D no platform velocity at all. Left alone that produces
+## every one of the surface bugs at once: the ground slides out from under a
+## standing player, the leading hemisphere shoves into them like an invisible
+## wall they can't out-run, and the repeated depenetration reads as bouncing.
+##
+## So while within `planet_frame_height` of a body's surface we treat that body
+## as the local inertial frame: the player's whole transform is carried by the
+## planet's per-frame rigid motion, and `velocity` is stored relative to the
+## planet rather than to the world. Handing over between frames adds/removes the
+## frame velocity so world momentum stays continuous (a Galilean shift, so
+## impulses and gravity need no adjustment).
+func _update_planet_frame(delta: float) -> void:
+	var body: OrbitalBody = GravityManager.get_nearest_body(global_position)
+	if body != null:
+		# Hysteresis: hold on to the frame we already have a little past the
+		# acquire range so a player hovering at the edge, or sitting midway
+		# between two close bodies, doesn't flip frames every frame.
+		var limit: float = planet_frame_height
+		if body == _frame_body:
+			limit *= planet_frame_release_ratio
+		if (global_position.distance_to(body.global_position) - body.radius) > limit:
+			body = null
+
+	if body != _frame_body:
+		if _frame_body != null and is_instance_valid(_frame_body):
+			velocity += _frame_body.get_point_velocity(global_position)
+		_frame_body = body
+		if _frame_body != null:
+			velocity -= _frame_body.get_point_velocity(global_position)
+
+	if _frame_body == null:
+		_platform_velocity = Vector3.ZERO
+		return
+
+	_platform_velocity = _frame_body.get_point_velocity(global_position)
+	var carried: Transform3D = _frame_body.motion_delta * global_transform
+	carried.basis = carried.basis.orthonormalized()
+	global_transform = carried
+
+## World-space velocity, i.e. `velocity` plus the motion of the planet whose
+## frame we're riding. Anything that leaves the player and lives in world space
+## (projectiles inheriting muzzle velocity, AI lead prediction) wants this, not
+## the frame-relative `velocity`.
+func get_world_velocity() -> Vector3:
+	return velocity + _platform_velocity
+
+## Inverse of get_world_velocity(): assign a world-space velocity, converting it
+## into the current planet frame.
+func set_world_velocity(world_velocity: Vector3) -> void:
+	velocity = world_velocity - _platform_velocity
+
+## "Up" is the radial direction away from the planet we're standing on, not the
+## direction of summed gravity. Those differ wherever a second body's influence
+## overlaps (moons, and the Alpha/Beta binary), and a tilted up_direction makes
+## CharacterBody3D classify the sphere underfoot as a wall past floor_max_angle -
+## which is felt as an invisible wall partway around a planet. Falls back to
+## gravity in open space, where there's no surface to be radial to.
+func _get_up_direction() -> Vector3:
+	if _frame_body != null and is_instance_valid(_frame_body) and not _frame_body.is_shattered:
+		var radial: Vector3 = global_position - _frame_body.global_position
+		if radial.length_squared() > 0.0001:
+			return radial.normalized()
+	if current_gravity.length() > 0.0001:
+		return -current_gravity.normalized()
+	return up_direction
+
+## True while the Space Board is out, which swaps the grounded Q3 movement model
+## for free 6-axis flight (see _apply_flight_movement).
+func _is_flight_mode() -> bool:
+	if is_dead or _is_spawning():
+		return false
+	var active: Weapon = weapon_manager.get_active_weapon() if weapon_manager else null
+	return active != null and active.has_method("is_flight_active") and active.is_flight_active()
 
 ## Extra corrective pull toward the nearest planet's center whenever close
 ## to its surface, so normal running/jumping can't accumulate enough
@@ -333,9 +464,17 @@ func _apply_movement(up: Vector3, delta: float) -> void:
 	var move_axis: Vector2 = _get_move_axis()
 	if move_axis.length() > 1.0:
 		move_axis = move_axis.normalized()
+	# Flatten the wish direction into the tangent plane. The body's basis lags
+	# the true "up" slightly (it re-levels at align_to_gravity_speed), so on a
+	# curved surface `forward` tilts off the tangent - and feeding that straight
+	# into the accelerate step injects an outward component into the horizontal
+	# velocity, which pops the player off the ground as a steady bounce.
 	var wish_dir: Vector3 = (forward * move_axis.y + right * move_axis.x)
+	wish_dir -= up * wish_dir.dot(up)
 	if wish_dir.length_squared() > 0.0001:
 		wish_dir = wish_dir.normalized()
+	else:
+		wish_dir = Vector3.ZERO
 
 	var vel_up: float = velocity.dot(up)
 	var vel_horizontal: Vector3 = velocity - up * vel_up
@@ -346,11 +485,75 @@ func _apply_movement(up: Vector3, delta: float) -> void:
 		if _wants_jump():
 			var g_mag: float = max(current_gravity.length(), 4.0)
 			vel_up = sqrt(2.0 * g_mag * jump_height)
+		else:
+			# Discard any leftover outward speed while grounded. Running over a
+			# curved, moving surface keeps generating small positive vel_up from
+			# collision response; without this it accumulates into a hop.
+			vel_up = min(vel_up, 0.0)
 	else:
 		vel_horizontal = _q3_air_accelerate(wish_dir, max_ground_speed, air_accel, air_speed_cap, vel_horizontal, delta)
 
 	vel_up += current_gravity.dot(up) * delta
 	velocity = vel_horizontal + up * vel_up
+	move_and_slide()
+
+## Space Board flight: full 6-axis freedom instead of the tangent-plane ground
+## model. WASD thrusts along the camera's own axes (so looking up and holding
+## forward climbs), jump/crouch thrust along the current up, and gravity is
+## nearly cancelled so a held direction actually holds. Drag rather than a hard
+## speed clamp does most of the limiting, which keeps steering responsive.
+func _apply_flight_movement(up: Vector3, delta: float) -> void:
+	if _boundary_target != null:
+		return
+
+	var cam_basis: Basis = camera.global_transform.basis if camera else global_transform.basis
+	var move_axis: Vector2 = _get_move_axis()
+	if move_axis.length() > 1.0:
+		move_axis = move_axis.normalized()
+
+	var wish: Vector3 = (-cam_basis.z) * move_axis.y + cam_basis.x * move_axis.x
+	var vertical: float = (1.0 if _wants_jump() else 0.0) - (1.0 if _wants_descend() else 0.0)
+	wish += up * vertical
+	if wish.length_squared() > 1.0:
+		wish = wish.normalized()
+
+	velocity += wish * board_accel * delta
+	velocity += current_gravity * board_gravity_scale * delta
+	velocity = _apply_friction(velocity, board_damping, delta)
+	if velocity.length() > board_max_speed:
+		velocity = velocity.normalized() * board_max_speed
+	move_and_slide()
+
+## ---- Ladders --------------------------------------------------------------
+## Called by Ladder.gd as we enter/leave a building's climb volume.
+func set_ladder(ladder: Node3D) -> void:
+	_ladder = ladder
+
+func clear_ladder(ladder: Node3D) -> void:
+	if _ladder == ladder:
+		_ladder = null
+
+func _is_on_ladder() -> bool:
+	if is_dead or _is_spawning() or _boundary_target != null:
+		return false
+	return _ladder != null and is_instance_valid(_ladder)
+
+## Climbing suspends gravity entirely and drives velocity straight from input
+## along the ladder's own axis - a Q3 accelerate model would just slide you off
+## the rungs. Strafing still works so you can step out onto a floor, and the
+## planet-frame carry keeps the ladder under you as its planet orbits.
+func _apply_ladder_movement(delta: float) -> void:
+	var axis: Vector3 = _ladder.global_transform.basis.y.normalized()
+	var move: Vector2 = _get_move_axis()
+	var climb: float = move.y
+	if _wants_jump():
+		climb = 1.0
+	elif _wants_descend():
+		climb = -1.0
+
+	var lateral: Vector3 = global_transform.basis.x * move.x * ladder_lateral_speed
+	lateral -= axis * lateral.dot(axis)
+	velocity = axis * climb * ladder_climb_speed + lateral
 	move_and_slide()
 
 func _apply_friction(vel: Vector3, friction: float, delta: float) -> Vector3:
@@ -404,6 +607,10 @@ func _get_look_delta() -> Vector2:
 
 func _wants_jump() -> bool:
 	return Input.is_physical_key_pressed(KEY_SPACE)
+
+## Space Board only: thrust "down" along the current up direction.
+func _wants_descend() -> bool:
+	return Input.is_physical_key_pressed(KEY_CTRL) or Input.is_physical_key_pressed(KEY_C)
 
 func _wants_fire() -> bool:
 	return Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
@@ -499,6 +706,12 @@ func _respawn() -> void:
 	collision_layer = _default_collision_layer
 	collision_mask = _default_collision_mask
 	velocity = Vector3.ZERO
+	# The Spawner teleports us to the boundary, so whatever planet frame we were
+	# riding is stale - dropping it here stops that planet's motion_delta being
+	# applied to the new position for a frame.
+	_frame_body = null
+	_platform_velocity = Vector3.ZERO
+	_ladder = null
 	_has_aligned_once = false
 	_start_spawn_sequence()
 
@@ -517,6 +730,28 @@ func _on_spawn_complete() -> void:
 ## is exclusively used to lock onto a planet without also triggering weapons.
 func _is_spawning() -> bool:
 	return _spawner != null and _spawner._active
+
+## The weapon to render in third person. On the authority that's simply whatever
+## WeaponManager has selected, and publishing it here is what feeds the
+## replicated field; on a remote copy it's whatever that field points at, applied
+## here because handle_input() never runs for a peer we don't simulate.
+func get_displayed_weapon() -> Weapon:
+	if weapon_manager == null:
+		return null
+	if is_multiplayer_authority():
+		current_weapon_index = weapon_manager.get_current_index()
+	else:
+		weapon_manager.set_current_index(current_weapon_index)
+	return weapon_manager.get_active_weapon()
+
+## Spawner hooks. Humans get the full aim window and default to the nearest
+## planet; Bot overrides both so 31 of them don't idle at the boundary for ten
+## seconds and then all pile onto the same rock.
+func get_spawn_aim_window() -> float:
+	return 10.0
+
+func pick_spawn_target() -> OrbitalBody:
+	return GravityManager.get_nearest_body(global_position)
 
 func get_look_direction() -> Vector3:
 	return -camera.global_transform.basis.z
@@ -541,8 +776,10 @@ func _setup_replication() -> void:
 	if sync == null:
 		return
 	var config := SceneReplicationConfig.new()
-	var always_props := [".:transform", ".:velocity"]
-	var on_change_props := [".:health", ".:is_dead", ".:visible"]
+	# hook_end moves every frame while a cable is out, so it rides the ALWAYS
+	# channel alongside transform; hook_active only flips on fire/release.
+	var always_props := [".:transform", ".:velocity", ".:hook_end"]
+	var on_change_props := [".:health", ".:is_dead", ".:visible", ".:hook_active", ".:current_weapon_index"]
 	for p in always_props:
 		var path := NodePath(p)
 		config.add_property(path)

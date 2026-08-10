@@ -34,6 +34,15 @@ signal fragment_spawned(fragment: OrbitalBody)
 @export var fragment_count_max: int = 4
 
 var is_shattered: bool = false
+## Rigid motion of this body between the previous physics frame and the current
+## one, expressed as a transform that maps a point's old world position to its
+## new one. Planets here orbit at up to ~12 m/s - faster than a player can run -
+## and spin on top of that, so anything standing on one has to be carried by
+## this delta or the surface simply slides out from under it (Player owns that;
+## see Player._update_planet_frame).
+var motion_delta: Transform3D = Transform3D.IDENTITY
+var _prev_global_transform: Transform3D = Transform3D.IDENTITY
+var _motion_delta_time: float = 0.0
 var _orbit_angle: float = 0.0
 ## Bodies with eccentricity use semi-major (orbit_radius) and semi-minor
 ## (_semi_minor) axes to trace an ellipse instead of a circle.
@@ -59,6 +68,12 @@ func _ready() -> void:
 	GravityManager.register_body(self)
 	if orbit_pivot:
 		_update_orbit_position()
+	# Riders read motion_delta during their own _physics_process, so every body
+	# must have finished moving before any player runs. Tree order already puts
+	# OrbitalBodies ahead of Players in Arena.tscn, but an explicit priority
+	# means that stays true if the scene is ever reordered.
+	process_physics_priority = -10
+	_prev_global_transform = global_transform
 
 func _apply_visual_scale() -> void:
 	if not is_inside_tree():
@@ -71,6 +86,8 @@ func _apply_visual_scale() -> void:
 
 func _physics_process(delta: float) -> void:
 	if is_shattered:
+		motion_delta = Transform3D.IDENTITY
+		_motion_delta_time = 0.0
 		return
 	if orbit_pivot and orbit_speed != 0.0:
 		_orbit_angle += orbit_speed * delta
@@ -78,6 +95,21 @@ func _physics_process(delta: float) -> void:
 		_check_boundary()
 	if spin_speed != 0.0:
 		rotate(spin_axis.normalized(), spin_speed * delta)
+	_update_motion_delta(delta)
+
+func _update_motion_delta(delta: float) -> void:
+	motion_delta = global_transform * _prev_global_transform.affine_inverse()
+	motion_delta.basis = motion_delta.basis.orthonormalized()
+	_prev_global_transform = global_transform
+	_motion_delta_time = delta
+
+## World-space velocity of the point on (or above) this body that currently sits
+## at `world_point`, combining orbital travel and self-rotation. Used to convert
+## player velocity in and out of this body's reference frame.
+func get_point_velocity(world_point: Vector3) -> Vector3:
+	if _motion_delta_time <= 0.0:
+		return Vector3.ZERO
+	return ((motion_delta * world_point) - world_point) / _motion_delta_time
 
 func _update_orbit_position() -> void:
 	var axis := orbit_axis.normalized()
