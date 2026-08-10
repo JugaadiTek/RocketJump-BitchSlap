@@ -1,23 +1,25 @@
 class_name Bot
 extends Player
-## Basic opponent AI. Reuses 100% of Player's movement/gravity/weapon code -
-## it only overrides the `_get_*` input hooks to feed in AI-computed values
-## instead of reading Input/mouse, plus its own yaw/pitch aiming since it has
-## no mouse delta to work with (see `_steer_toward` below).
-##
-## Behavior is a minimal two-state loop: WANDER when no enemy is visible,
-## ENGAGE when one is. Good enough to populate an arena and shoot back;
-## not meant to be a competitive bot.
 
 enum AiState { WANDER, ENGAGE }
 
-@export var sight_range: float = 55.0
+const BOT_NAMES: Array[String] = [
+	"Xargon", "Blastrix", "Voidwing", "Krak", "Zephyra", "Pulsar", "Nibor",
+	"Strikex", "Nullform", "Cygnia", "Mortex", "Vox", "Skullfire", "Zaptor",
+	"Grimweld", "Nebulax", "Smashkov", "Phaseron", "Quakron", "Rocketrix",
+	"Boneclaw", "Craterface", "Voidmaw", "Starbane", "Killswitch", "Driftex",
+	"Pyroclaw", "Gorgax", "Splinter", "Desolax", "Wraithex", "Blasteroid"
+]
+
+@export var sight_range: float = 180.0
 @export var max_turn_speed_degrees: float = 220.0
 @export var wander_interval: float = 5.0
 @export var retarget_interval: float = 0.25
 @export var preferred_combat_range_min: float = 8.0
-@export var preferred_combat_range_max: float = 24.0
-@export var fire_angle_tolerance_degrees: float = 7.0
+@export var preferred_combat_range_max: float = 40.0
+## Base accuracy: 0 = perfect, higher = more error in degrees
+@export var aim_error_min_deg: float = 2.0
+@export var aim_error_max_deg: float = 14.0
 
 var _state: AiState = AiState.WANDER
 var _target: Player = null
@@ -36,12 +38,14 @@ var _ai_weapon_index: int = -1
 func _uses_mouse_look() -> bool:
 	return false
 
-## Bots ARE simulation-authoritative (is_multiplayer_authority() is true for
-## them, same as it is by default for the real local player in offline
-## play) but must never be treated as "the screen the human is looking
-## through" - see Player._is_local_view().
 func _is_local_view() -> bool:
 	return false
+
+func _ready() -> void:
+	## Pick a random bot name if none assigned yet
+	if display_name == "Player":
+		display_name = BOT_NAMES[randi() % BOT_NAMES.size()]
+	super._ready()
 
 func _physics_process(delta: float) -> void:
 	if is_multiplayer_authority() and not is_dead:
@@ -68,11 +72,22 @@ func _think(delta: float) -> void:
 
 func _do_engage(_delta: float) -> void:
 	var eye: Vector3 = camera.global_position
-	var to_target: Vector3 = _target.global_position - eye
-	var dist: float = to_target.length()
-	_ai_desired_dir = to_target.normalized()
+	var dist: float = eye.distance_to(_target.global_position)
 
-	# Movement: hold a preferred range, strafing to make ourselves a harder target.
+	## Lead the target for slow weapons (rocket, slug)
+	var aim_pos: Vector3 = _predict_target_pos(dist)
+
+	var to_aim: Vector3 = aim_pos - eye
+	## Apply random accuracy error
+	var error_rad: float = deg_to_rad(randf_range(aim_error_min_deg, aim_error_max_deg))
+	var perp: Vector3 = to_aim.cross(Vector3.UP)
+	if perp.length_squared() < 0.001:
+		perp = to_aim.cross(Vector3.RIGHT)
+	perp = perp.normalized()
+	var error_angle: float = randf_range(-error_rad, error_rad)
+	to_aim = to_aim.rotated(perp.normalized(), error_angle)
+	_ai_desired_dir = to_aim.normalized()
+
 	var forward_amount: float = 0.0
 	if dist > preferred_combat_range_max:
 		forward_amount = 1.0
@@ -82,23 +97,33 @@ func _do_engage(_delta: float) -> void:
 		_strafe_dir *= -1.0
 	_ai_move_axis = Vector2(_strafe_dir * 0.7, forward_amount)
 
-	# Weapon choice: melee if grabbing range, rocket mid-range, rail long range.
 	if dist < 3.0:
 		_ai_wants_melee = true
-	elif dist < 28.0:
-		_ai_weapon_index = 0 # rocket launcher
+	elif dist < preferred_combat_range_max:
+		_ai_weapon_index = 0 # rocket
 	else:
 		_ai_weapon_index = 1 # railgun
 
 	var facing_error_deg: float = rad_to_deg(get_look_direction().angle_to(_ai_desired_dir))
-	if facing_error_deg <= fire_angle_tolerance_degrees:
+	if facing_error_deg <= aim_error_max_deg * 0.5 + 4.0:
 		_ai_wants_fire = true
 
 	if randf() < 0.004:
 		_ai_wants_jump = true
 
-func _do_wander(delta: float) -> void:
-	_wander_timer -= delta
+## Predict where a slow projectile will intercept the target.
+func _predict_target_pos(dist_to_target: float) -> Vector3:
+	if _target == null or not is_instance_valid(_target):
+		return Vector3.ZERO
+	## Only lead for slow weapons (rocket ~26, slug ~10); railgun is instant
+	var weapon_speed: float = 26.0
+	if _ai_weapon_index == 1:
+		return _target.global_position  ## hitscan, no lead needed
+	var time_to_hit: float = dist_to_target / max(weapon_speed, 1.0)
+	return _target.global_position + _target.velocity * time_to_hit
+
+func _do_wander(_delta: float) -> void:
+	_wander_timer -= _delta
 	if _wander_timer <= 0.0 or global_position.distance_to(_wander_point) < 4.0:
 		_wander_timer = wander_interval
 		_wander_point = _pick_wander_point()
@@ -117,12 +142,10 @@ func _pick_wander_point() -> Vector3:
 	var body: OrbitalBody = GravityManager.get_nearest_body(global_position)
 	if body == null:
 		return global_position + (-global_transform.basis.z) * 10.0
-	var rand_dir: Vector3 = Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1))
-	if rand_dir.length_squared() < 0.001:
-		rand_dir = Vector3.UP
-	rand_dir = rand_dir.normalized()
+	var rand_dir := Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)).normalized()
 	return body.global_position + rand_dir * (body.radius + 1.5)
 
+## Bots target any damageable node that isn't themselves — including other bots.
 func _find_enemy() -> Player:
 	var best: Player = null
 	var best_dist: float = sight_range
@@ -130,7 +153,7 @@ func _find_enemy() -> Player:
 	for node in get_tree().get_nodes_in_group("players"):
 		if node == self or not is_instance_valid(node):
 			continue
-		if node.is_dead:
+		if "is_dead" in node and node.is_dead:
 			continue
 		var dist: float = eye.distance_to(node.global_position)
 		if dist > best_dist:
@@ -143,19 +166,14 @@ func _find_enemy() -> Player:
 func _has_line_of_sight(from: Vector3, to: Vector3) -> bool:
 	var space_state := get_world_3d().direct_space_state
 	var query := PhysicsRayQueryParameters3D.create(from, to)
-	query.collision_mask = 1 # world/planets only
+	query.collision_mask = 1
 	var result: Dictionary = space_state.intersect_ray(query)
 	return result.is_empty()
 
-## Turns the bot's body (yaw) and head (pitch) toward `desired_dir`, clamped
-## to max_turn_speed_degrees per second. Uses Godot's documented right-hand
-## rotation convention directly instead of routing through the mouse-delta
-## abstraction, since there's no real mouse input to fake here.
 func _steer_toward(desired_dir: Vector3, delta: float) -> void:
 	if desired_dir.length_squared() < 0.0001:
 		return
 	var max_step: float = deg_to_rad(max_turn_speed_degrees) * delta
-
 	var up: Vector3 = up_direction
 	var current_forward: Vector3 = -global_transform.basis.z
 	var cf_flat: Vector3 = (current_forward - up * current_forward.dot(up))
@@ -173,30 +191,12 @@ func _steer_toward(desired_dir: Vector3, delta: float) -> void:
 	desired_pitch = clamp(desired_pitch, -pitch_limit, pitch_limit)
 	head.rotation.x = move_toward(head.rotation.x, desired_pitch, max_step)
 
-## ---- Input hooks ---------------------------------------------------------
-func _get_move_axis() -> Vector2:
-	return _ai_move_axis
-
-func _get_look_delta() -> Vector2:
-	return Vector2.ZERO # steering is applied directly in _steer_toward
-
-func _wants_jump() -> bool:
-	return _ai_wants_jump
-
-func _wants_fire() -> bool:
-	return _ai_wants_fire
-
-func _wants_aim() -> bool:
-	return false # bots don't ADS in this starter version
-
-func _wants_scoreboard() -> bool:
-	return false # bots have no HUD/scoreboard to show
-
-func _wants_melee() -> bool:
-	return _ai_wants_melee
-
-func _get_weapon_switch() -> int:
-	return _ai_weapon_index
-
-func _get_weapon_scroll() -> int:
-	return 0 # bots pick weapons directly via _get_weapon_switch instead
+func _get_move_axis() -> Vector2: return _ai_move_axis
+func _get_look_delta() -> Vector2: return Vector2.ZERO
+func _wants_jump() -> bool: return _ai_wants_jump
+func _wants_fire() -> bool: return _ai_wants_fire
+func _wants_aim() -> bool: return false
+func _wants_scoreboard() -> bool: return false
+func _wants_melee() -> bool: return _ai_wants_melee
+func _get_weapon_switch() -> int: return _ai_weapon_index
+func _get_weapon_scroll() -> int: return 0

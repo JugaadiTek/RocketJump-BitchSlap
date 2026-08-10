@@ -83,6 +83,7 @@ const SPAWNS_PER_BODY: int = 4
 @export var planet_buster_pad_bodies: Array[String] = ["Verdant", "Umbra"]
 @export var jump_pad_scene: PackedScene
 @export var jump_pad_bodies: Array[String] = ["Alpha", "Beta", "Ferrum", "Cobalt"]
+@export var tower_scene: PackedScene
 
 @onready var orbit_center: Node3D = $OrbitCenter
 @onready var orbital_bodies_container: Node3D = $OrbitalBodies
@@ -97,6 +98,7 @@ func _ready() -> void:
 	_build_spawn_points()
 	_build_planet_buster_pads()
 	_build_jump_pads()
+	_build_towers()
 
 	if NetworkManager.is_online:
 		NetworkManager.player_joined.connect(_on_player_joined)
@@ -126,6 +128,7 @@ func _build_orbital_bodies() -> void:
 		body.orbit_start_angle = data["start_angle"]
 		body.can_be_shattered = data["can_be_shattered"]
 		body.spin_speed = randf_range(0.02, 0.08) * (1.0 if randf() < 0.5 else -1.0)
+		body._orbit_template = orbital_body_scene
 		# Every export above MUST be set before add_child() - add_child()
 		# triggers _ready() synchronously, and _ready() copies
 		# orbit_start_angle into its internal _orbit_angle. Setting
@@ -189,6 +192,35 @@ func _build_jump_pads() -> void:
 		var basis_z: Vector3 = basis_x.cross(dir).normalized()
 		pad.transform = Transform3D(Basis(basis_x, dir, basis_z), dir * (body.radius + 0.1))
 
+func _build_towers() -> void:
+	if tower_scene == null:
+		return
+	for body_name in _bodies_by_name:
+		var body: OrbitalBody = _bodies_by_name[body_name]
+		# Moons and tiny bodies skip towers (too small to be useful)
+		if body.radius < 6.0:
+			continue
+		var count: int = randi_range(0, 3)
+		for _i in range(count):
+			var tower: Node3D = tower_scene.instantiate()
+			body.add_child(tower)
+			# Orient the tower so its local +Y points radially outward from
+			# the planet surface (the planet's local "up" from any position).
+			var rand_angle: float = randf_range(0.0, TAU)
+			var polar: float = randf_range(0.2, 0.85) # avoid exact poles
+			var surface_dir := Vector3(
+				sin(polar) * cos(rand_angle),
+				cos(polar),
+				sin(polar) * sin(rand_angle)
+			).normalized()
+			# Build a basis with Y = surface_dir
+			var ref: Vector3 = Vector3.RIGHT if abs(surface_dir.dot(Vector3.RIGHT)) < 0.9 else Vector3.FORWARD
+			var bx: Vector3 = surface_dir.cross(ref).normalized()
+			var bz: Vector3 = bx.cross(surface_dir).normalized()
+			tower.transform = Transform3D(Basis(bx, surface_dir, bz), surface_dir * body.radius)
+			tower.tower_height = body.radius
+			tower.floor_count = max(2, int(body.radius / 8.0))
+
 func _spawn_bots() -> void:
 	if bot_scene == null:
 		return
@@ -201,7 +233,8 @@ func _spawn_bots() -> void:
 		# the scoreboard/kill-counter regardless of multiplayer_authority
 		# (which defaults to the same id 1 as the real local player offline).
 		bot.player_id = -(i + 1)
-		bot.display_name = "Bot %d" % (i + 1)
+		# Bot.gd._ready() already picked a random name from BOT_NAMES; just
+		# re-register it with MatchState now that player_id is also set.
 		MatchState.register_player(bot.player_id, bot.display_name)
 		var sp: Node3D = MatchState.get_random_spawn_point()
 		if sp:
@@ -233,7 +266,5 @@ func _spawn_player(peer_id: int) -> void:
 	player.player_id = peer_id
 	player.display_name = "Player %d" % peer_id
 	MatchState.register_player(player.player_id, player.display_name)
-	var sp: Node3D = MatchState.get_random_spawn_point()
-	if sp:
-		player.global_position = sp.global_position
-		player.global_transform.basis = sp.global_transform.basis
+	# Position and facing are handled by the Spawner (Player._start_spawn_sequence)
+	# which places the player on the boundary sphere, facing inward.

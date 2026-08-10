@@ -1,4 +1,4 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://scripts/weapons/Railgun.gd" id="1"]
 
@@ -7,6 +7,16 @@ size = Vector3(0.09, 0.09, 0.58)
 
 [sub_resource type="BoxMesh" id="BoxMesh_stock"]
 size = Vector3(0.11, 0.12, 0.16)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_scope"]
+top_radius = 0.035
+bottom_radius = 0.04
+height = 0.22
+radial_segments = 12
+
+[sub_resource type="SphereMesh" id="SphereMesh_lens"]
+radius = 0.038
+height = 0.076
 
 [node name="Railgun" type="Node3D"]
 script = ExtResource("1")
@@ -20,3 +30,13 @@ mesh = SubResource("BoxMesh_body")
 [node name="Stock" type="MeshInstance3D" parent="ViewModel"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.04, -0.14, -0.04)
 mesh = SubResource("BoxMesh_stock")
+
+[node name="Scope" type="Node3D" parent="ViewModel"]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0.045, -0.14, -0.5)
+
+[node name="ScopeTube" type="MeshInstance3D" parent="ViewModel/Scope"]
+mesh = SubResource("CylinderMesh_scope")
+
+[node name="ScopeLens" type="MeshInstance3D" parent="ViewModel/Scope"]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0.13, 0)
+mesh = SubResource("SphereMesh_lens")

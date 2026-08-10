@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="Script" path="res://scripts/player/Player.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/player/WeaponManager.gd" id="2"]
@@ -8,6 +8,8 @@
 [ext_resource type="PackedScene" path="res://scenes/weapons/SlugLauncher.tscn" id="6"]
 [ext_resource type="PackedScene" path="res://scenes/weapons/PlanetBuster.tscn" id="7"]
 [ext_resource type="PackedScene" path="res://scenes/player/Corpse.tscn" id="8"]
+[ext_resource type="PackedScene" path="res://scenes/weapons/SpaceBoard.tscn" id="9"]
+[ext_resource type="PackedScene" path="res://scenes/weapons/GrapplingHook.tscn" id="10"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_1"]
 radius = 0.4
@@ -49,6 +51,8 @@ rocket_launcher_scene = ExtResource("4")
 railgun_scene = ExtResource("5")
 slug_launcher_scene = ExtResource("6")
 planet_buster_scene = ExtResource("7")
+space_board_scene = ExtResource("9")
+grappling_hook_scene = ExtResource("10")
 
 [node name="Melee" type="Node" parent="."]
 script = ExtResource("3")

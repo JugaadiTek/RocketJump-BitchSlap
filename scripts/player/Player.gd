@@ -87,6 +87,7 @@ var _prev_edge_states: Dictionary = {}
 @onready var sync: MultiplayerSynchronizer = $MultiplayerSynchronizer
 
 var hud: CanvasLayer = null
+var _spawner: Node = null
 
 func _ready() -> void:
 	health = max_health
@@ -112,6 +113,8 @@ func _ready() -> void:
 			camera.current = false
 		if weapon_manager:
 			weapon_manager.visible = false
+	if is_multiplayer_authority():
+		_start_spawn_sequence()
 
 ## True for the human-controlled local view; Bot overrides this to false. Not
 ## to be confused with is_multiplayer_authority(), which controls whether
@@ -164,7 +167,8 @@ func _physics_process(delta: float) -> void:
 
 	if _wants_melee():
 		melee.try_activate()
-	weapon_manager.handle_input(delta, _wants_fire(), _get_weapon_switch(), _get_weapon_scroll())
+	if not _is_spawning():
+		weapon_manager.handle_input(delta, _wants_fire(), _get_weapon_switch(), _get_weapon_scroll())
 
 	if hud:
 		hud.update_health(health, max_health)
@@ -177,6 +181,16 @@ func _physics_process(delta: float) -> void:
 			hud.update_charge_bar(active_weapon.get_charge(), true)
 		else:
 			hud.update_charge_bar(0.0, false)
+		# Planet buster lock-on indicator
+		if active_weapon and active_weapon is PlanetBuster:
+			hud.update_lock_indicator(active_weapon.get_aimed_candidate(), active_weapon.get_lock_target(), active_weapon.get_lock_progress())
+		else:
+			hud.update_lock_indicator(null, null, 0.0)
+		# Spawn aim window
+		if _is_spawning() and _spawner:
+			pass  # Spawner calls hud.update_spawn_aim directly
+		else:
+			hud.hide_spawn_aim()
 
 ## Extra corrective pull toward the nearest planet's center whenever close
 ## to its surface, so normal running/jumping can't accumulate enough
@@ -479,17 +493,30 @@ func _die(instigator: Node, weapon_name: String) -> void:
 	_respawn()
 
 func _respawn() -> void:
-	var sp: Node3D = MatchState.get_random_spawn_point()
-	if sp:
-		global_position = sp.global_position
-		global_transform.basis = sp.global_transform.basis
-		_has_aligned_once = false
 	health = max_health
 	is_dead = false
 	visible = true
 	collision_layer = _default_collision_layer
 	collision_mask = _default_collision_mask
 	velocity = Vector3.ZERO
+	_has_aligned_once = false
+	_start_spawn_sequence()
+
+func _start_spawn_sequence() -> void:
+	if _spawner == null:
+		const SpawnerScript = preload("res://scripts/player/Spawner.gd")
+		_spawner = SpawnerScript.new()
+		add_child(_spawner)
+		_spawner.spawn_complete.connect(_on_spawn_complete)
+	_spawner.start_spawn(self)
+
+func _on_spawn_complete() -> void:
+	pass  # Normal gameplay resumes automatically when Spawner clears _active
+
+## Block normal fire input during the spawn aim window so the fire button
+## is exclusively used to lock onto a planet without also triggering weapons.
+func _is_spawning() -> bool:
+	return _spawner != null and _spawner._active
 
 func get_look_direction() -> Vector3:
 	return -camera.global_transform.basis.z
@@ -505,6 +532,7 @@ const HUD_SCENE: PackedScene = preload("res://scenes/ui/HUD.tscn")
 func _setup_hud() -> void:
 	hud = HUD_SCENE.instantiate()
 	add_child(hud)
+	hud.set_player_id(player_id)
 
 ## Sets up what gets replicated to other peers. Position/rotation/velocity
 ## sync continuously so remote players look reasonably smooth; health and

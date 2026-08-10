@@ -3,17 +3,25 @@ extends Projectile
 
 @export var planet_blast_radius: float = 90.0
 @export var planet_blast_damage: float = 500.0
-## If it hits a player directly instead of a planet, it still hurts a lot.
 @export var direct_hit_damage: float = 150.0
 @export var direct_hit_radius: float = 12.0
+@export var steer_rate: float = 0.35  ## slerp factor per frame toward target
 
+var lock_target: OrbitalBody = null
 var _exploded: bool = false
+
+func _steer(_delta: float) -> void:
+	if lock_target == null or not is_instance_valid(lock_target) or lock_target.is_shattered:
+		return
+	var to_target: Vector3 = (lock_target.global_position - global_position).normalized()
+	var current_dir: Vector3 = velocity.normalized() if velocity.length() > 0.01 else to_target
+	var new_dir: Vector3 = current_dir.slerp(to_target, steer_rate)
+	velocity = new_dir.normalized() * velocity.length()
 
 func _on_hit(collider: Object, hit_position: Vector3, _hit_normal: Vector3) -> void:
 	if _exploded:
 		return
 	_exploded = true
-
 	if collider is StaticBody3D and collider.has_meta("orbital_body"):
 		var body: OrbitalBody = collider.get_meta("orbital_body")
 		if is_instance_valid(body) and body.can_be_shattered:

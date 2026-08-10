@@ -28,9 +28,17 @@ func _ready() -> void:
 	collision_mask |= 8 # npcs
 
 func launch(initial_velocity: Vector3, shooter: Node) -> void:
-	velocity = initial_velocity
+	# Add the shooter's current velocity so the projectile doesn't appear to
+	# shoot backwards when the player is moving fast (e.g. rocket fired while
+	# sprinting should travel forward, not arc behind the player).
+	var shooter_vel: Vector3 = Vector3.ZERO
+	if shooter and "velocity" in shooter:
+		shooter_vel = shooter.velocity
+	velocity = initial_velocity + shooter_vel
 	owner_player = shooter
-	look_at(global_position + initial_velocity.normalized(), Vector3.UP if abs(initial_velocity.normalized().dot(Vector3.UP)) < 0.99 else Vector3.RIGHT)
+	var dir: Vector3 = velocity.normalized() if velocity.length() > 0.01 else initial_velocity.normalized()
+	if dir.length_squared() > 0.0001:
+		look_at(global_position + dir, Vector3.UP if abs(dir.dot(Vector3.UP)) < 0.99 else Vector3.RIGHT)
 
 func _physics_process(delta: float) -> void:
 	_life_remaining -= delta

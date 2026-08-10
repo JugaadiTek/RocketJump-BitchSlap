@@ -8,6 +8,8 @@ extends Node3D
 @export var railgun_scene: PackedScene
 @export var slug_launcher_scene: PackedScene
 @export var planet_buster_scene: PackedScene
+@export var space_board_scene: PackedScene
+@export var grappling_hook_scene: PackedScene
 
 var _weapons: Array[Weapon] = []
 var _current_index: int = 0
@@ -22,6 +24,8 @@ func _ready() -> void:
 	_add_starting_weapon(rocket_launcher_scene)
 	_add_starting_weapon(railgun_scene)
 	_add_starting_weapon(slug_launcher_scene)
+	_add_starting_weapon(grappling_hook_scene)
+	_add_starting_weapon(space_board_scene)
 	_update_visibility()
 
 func _add_starting_weapon(scene: PackedScene) -> void:

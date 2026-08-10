@@ -1,23 +1,8 @@
 class_name OrbitalBody
 extends Node3D
-## A miniature planet. Two things happen here that are deliberately NOT
-## realistic physics, per the design brief ("do not perfectly emulate
-## physics, focus on fun gameplay"):
-##
-## 1. Orbits are simple circular/elliptical paths around a fixed pivot point,
-##    driven by an angle that advances every frame - not force integration.
-##    This keeps the arena's macro-motion predictable and readable even
-##    though...
-## 2. ...impacts (rockets, corpses, the planet buster) nudge the orbit's
-##    radius/speed/inclination by a small random percentage, so the arena
-##    layout drifts and gets slightly chaotic over a long match without ever
-##    spiraling into something unplayable.
-##
-## Gravity pull that affects players/projectiles is handled separately by
-## GravityManager, which reads `radius`, `surface_gravity` and
-## `influence_radius` off of this node.
 
 signal shattered(body: OrbitalBody)
+signal fragment_spawned(fragment: OrbitalBody)
 
 @export_group("Shape")
 @export var radius: float = 40.0:
@@ -26,43 +11,40 @@ signal shattered(body: OrbitalBody)
 		_apply_visual_scale()
 
 @export_group("Gravity")
-## Acceleration (m/s^2) felt by something standing on the surface.
 @export var surface_gravity: float = 20.0
-## Beyond this distance from the center, this body exerts no pull at all.
 @export var influence_radius: float = 220.0
 
 @export_group("Orbit")
-## If null, this body is static (used for the arena's outermost anchor, if any).
 @export var orbit_pivot: Node3D
 @export var orbit_radius: float = 0.0
-@export var orbit_speed: float = 0.0 ## radians/sec
+## Semi-minor axis: if 0, orbit is circular. Set to a fraction of orbit_radius
+## (e.g. 0.6) for an ellipse. Perturb_orbit can drift this over time.
+@export var orbit_eccentricity: float = 0.0
+@export var orbit_speed: float = 0.0
 @export var orbit_axis: Vector3 = Vector3.UP
 @export var orbit_start_angle: float = 0.0
 
 @export_group("Self rotation")
 @export var spin_axis: Vector3 = Vector3.UP
-@export var spin_speed: float = 0.1 ## radians/sec, purely cosmetic
+@export var spin_speed: float = 0.1
 
 @export_group("Destructible")
-## If true, the planet buster can shatter this body. The two central binary
-## bodies are usually left indestructible so there's always at least a couple
-## of planets left standing.
 @export var can_be_shattered: bool = true
+@export var fragment_count_min: int = 2
+@export var fragment_count_max: int = 4
 
 var is_shattered: bool = false
 var _orbit_angle: float = 0.0
+## Bodies with eccentricity use semi-major (orbit_radius) and semi-minor
+## (_semi_minor) axes to trace an ellipse instead of a circle.
+var _semi_minor: float = 0.0
+var _orbit_template: PackedScene = null  # set by Arena to allow fragment spawning
 
 @onready var mesh: MeshInstance3D = $MeshInstance3D
 @onready var collision: CollisionShape3D = $StaticBody3D/CollisionShape3D
 @onready var static_body: StaticBody3D = $StaticBody3D
 
 func _ready() -> void:
-	# Sub-resources embedded in a .tscn (the mesh, its material, and the
-	# collision shape) are the SAME object across every instantiate() call
-	# unless explicitly duplicated - without this, every planet's visuals
-	# AND collision would silently end up as whatever the last-built body in
-	# Arena._build_orbital_bodies() set, since they'd all be pointing at one
-	# shared resource.
 	mesh.mesh = mesh.mesh.duplicate()
 	var mat: Material = mesh.get_surface_override_material(0)
 	if mat:
@@ -71,6 +53,7 @@ func _ready() -> void:
 
 	add_to_group("orbital_bodies")
 	_orbit_angle = orbit_start_angle
+	_semi_minor = orbit_radius * (1.0 - clamp(orbit_eccentricity, 0.0, 0.95))
 	_apply_visual_scale()
 	static_body.set_meta("orbital_body", self)
 	GravityManager.register_body(self)
@@ -80,7 +63,7 @@ func _ready() -> void:
 func _apply_visual_scale() -> void:
 	if not is_inside_tree():
 		return
-	if mesh:
+	if mesh and mesh.mesh:
 		mesh.mesh.radius = radius
 		mesh.mesh.height = radius * 2.0
 	if collision and collision.shape is SphereShape3D:
@@ -92,21 +75,28 @@ func _physics_process(delta: float) -> void:
 	if orbit_pivot and orbit_speed != 0.0:
 		_orbit_angle += orbit_speed * delta
 		_update_orbit_position()
+		_check_boundary()
 	if spin_speed != 0.0:
 		rotate(spin_axis.normalized(), spin_speed * delta)
 
 func _update_orbit_position() -> void:
 	var axis := orbit_axis.normalized()
-	# Build two vectors perpendicular to the orbit axis to sweep the circle.
 	var reference := Vector3.RIGHT if abs(axis.dot(Vector3.RIGHT)) < 0.9 else Vector3.FORWARD
 	var tangent_a := axis.cross(reference).normalized()
 	var tangent_b := axis.cross(tangent_a).normalized()
-	var offset := (tangent_a * cos(_orbit_angle) + tangent_b * sin(_orbit_angle)) * orbit_radius
+	## Ellipse: a*cos(θ) along tangent_a, b*sin(θ) along tangent_b
+	var a: float = orbit_radius
+	var b: float = _semi_minor if _semi_minor > 0.0 else orbit_radius
+	var offset := (tangent_a * cos(_orbit_angle) * a + tangent_b * sin(_orbit_angle) * b)
 	global_position = orbit_pivot.global_position + offset
 
-## Called by rockets, corpses, and other impacts. `impact_strength` is 0..1
-## and scales how big a nudge the orbit gets (a rocket splash is a light
-## nudge, a corpse slamming in is a bit more).
+func _check_boundary() -> void:
+	if global_position.length() <= GravityManager.ARENA_BOUNDARY_RADIUS:
+		return
+	if not can_be_shattered:
+		return
+	_shatter_to_fragments()
+
 func perturb_orbit(impact_strength: float = 1.0) -> void:
 	if is_shattered or orbit_pivot == null:
 		return
@@ -116,13 +106,14 @@ func perturb_orbit(impact_strength: float = 1.0) -> void:
 	var sign_s: float = 1.0 if randf() < 0.5 else -1.0
 	orbit_radius = max(orbit_radius * (1.0 + sign_r * pct), radius * 1.5)
 	orbit_speed *= (1.0 + sign_s * pct)
-	# Very occasionally tilt the orbit plane a hair for extra chaos.
+	# Drift eccentricity slightly over time for emergent ellipses
+	orbit_eccentricity = clamp(orbit_eccentricity + randf_range(-0.002, 0.003) * strength_mult, 0.0, 0.7)
+	_semi_minor = orbit_radius * (1.0 - orbit_eccentricity)
 	if randf() < 0.15:
 		orbit_axis = (orbit_axis + Vector3(
 			randf_range(-0.01, 0.01), randf_range(-0.01, 0.01), randf_range(-0.01, 0.01)
 		)).normalized()
 
-## Planet Buster hit this body: remove it from play, damage everyone nearby.
 func shatter(blast_radius: float, blast_damage: float) -> void:
 	if is_shattered:
 		return
@@ -140,10 +131,67 @@ func shatter(blast_radius: float, blast_damage: float) -> void:
 			var falloff: float = 1.0 - (dist / blast_radius)
 			if node.has_method("apply_damage"):
 				node.apply_damage(blast_damage * falloff, self, global_position)
-	# The planet is gone for the rest of the match; free it after debris FX.
+	_spawn_moon_fragments()
 	await get_tree().create_timer(4.0).timeout
 	GravityManager.unregister_body(self)
 	queue_free()
+
+## Spawns 2-5 smaller orbiting bodies that become moons of nearby planets.
+## Called on Planet Buster destruction AND boundary ejection.
+func _spawn_moon_fragments() -> void:
+	if _orbit_template == null:
+		return
+	var count: int = randi_range(fragment_count_min, fragment_count_max)
+	var bodies := GravityManager.get_bodies()
+	# Pick the nearest non-shattered body to adopt each fragment as a moon
+	for i in range(count):
+		var frag: OrbitalBody = _orbit_template.instantiate()
+		get_tree().current_scene.get_node_or_null("Arena/OrbitalBodies").add_child(frag) if get_tree().current_scene.has_node("Arena/OrbitalBodies") else get_tree().current_scene.add_child(frag)
+		# Fragment radius = 20-40% of the parent
+		frag.radius = randf_range(radius * 0.2, radius * 0.4)
+		frag.surface_gravity = surface_gravity * (frag.radius / radius)
+		frag.influence_radius = frag.radius * 3.5
+		frag.can_be_shattered = true
+		frag._orbit_template = _orbit_template
+		# Random color variation of the parent
+		var base_color: Color = Color(randf_range(0.2, 0.9), randf_range(0.2, 0.9), randf_range(0.2, 0.9))
+		frag.radius = frag.radius  # trigger setter
+		var frag_mesh: MeshInstance3D = frag.get_node_or_null("MeshInstance3D")
+		if frag_mesh:
+			var frag_mat := StandardMaterial3D.new()
+			frag_mat.albedo_color = base_color
+			frag_mesh.set_surface_override_material(0, frag_mat)
+		# Pick a target parent body to orbit
+		var host: OrbitalBody = _pick_fragment_host(bodies, frag.radius)
+		if host == null:
+			host = bodies[0] if not bodies.is_empty() else null
+		if host:
+			frag.orbit_pivot = host
+			frag.orbit_radius = host.radius * randf_range(1.8, 3.5)
+			frag.orbit_speed = randf_range(0.1, 0.3) * (1.0 if randf() < 0.5 else -1.0)
+			frag.orbit_axis = Vector3(randf_range(-0.3, 0.3), 1.0, randf_range(-0.3, 0.3)).normalized()
+			frag.orbit_start_angle = randf_range(0.0, TAU)
+		frag.spin_speed = randf_range(0.03, 0.12) * (1.0 if randf() < 0.5 else -1.0)
+		frag.global_position = global_position + Vector3(randf_range(-20, 20), randf_range(-20, 20), randf_range(-20, 20))
+		fragment_spawned.emit(frag)
+
+func _shatter_to_fragments() -> void:
+	## Called when orbit drifts past arena boundary
+	shatter(radius * 1.5, 50.0)
+
+func _pick_fragment_host(bodies: Array[OrbitalBody], frag_radius: float) -> OrbitalBody:
+	var best: OrbitalBody = null
+	var best_score: float = INF
+	for body in bodies:
+		if body == self or body.is_shattered or not is_instance_valid(body):
+			continue
+		if body.radius < frag_radius * 2.0:
+			continue
+		var dist: float = body.global_position.distance_to(global_position)
+		if dist < best_score:
+			best_score = dist
+			best = body
+	return best
 
 func _spawn_debris() -> void:
 	var particles := GPUParticles3D.new()

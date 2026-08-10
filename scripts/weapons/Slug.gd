@@ -17,14 +17,30 @@ extends Projectile
 enum State { FLYING, SLITHERING }
 
 @export var damage: float = 40.0
-@export var turn_rate_degrees: float = 150.0 ## tighter turning once slithering than a flying homer would need
+@export var turn_rate_degrees: float = 150.0
 @export var tracking_range: float = 45.0
 @export var slither_speed: float = 7.0
+@export var max_hp: float = 25.0  ## slugs can be shot and killed mid-flight
+
+var _hp: float = 25.0
 
 var _state: State = State.FLYING
 var _landed_body: OrbitalBody = null
 var _surface_normal: Vector3 = Vector3.UP
 var _target: Node3D = null
+
+func _ready() -> void:
+	super._ready()
+	_hp = max_hp
+	add_to_group("damageable")
+
+## Other weapons (not other slugs) can damage and destroy a slug in flight.
+func apply_damage(amount: float, _instigator: Node, _hit_pos: Vector3, weapon_name: String = "") -> void:
+	if weapon_name == "Slug Launcher":
+		return  # slugs are immune to their own weapon
+	_hp -= amount
+	if _hp <= 0.0:
+		_expire()
 
 func _physics_process(delta: float) -> void:
 	_life_remaining -= delta

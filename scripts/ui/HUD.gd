@@ -1,7 +1,4 @@
 extends CanvasLayer
-## Local-only HUD, instantiated by Player.gd for the authority player only.
-## Player._physics_process() pushes updates in every frame; see
-## update_health() / update_weapons().
 
 @onready var health_bar: ProgressBar = $Root/HealthPanel/HealthBar
 @onready var health_label: Label = $Root/HealthPanel/HealthLabel
@@ -9,22 +6,41 @@ extends CanvasLayer
 @onready var weapon_list: VBoxContainer = $Root/WeaponPanel/WeaponList
 @onready var kills_label: Label = $Root/KillsPanel/KillsLabel
 @onready var scoreboard_panel: PanelContainer = $Root/ScoreboardPanel
-@onready var score_list: VBoxContainer = $Root/ScoreboardPanel/ScoreboardVBox/ScoreList
+@onready var score_scroll: ScrollContainer = $Root/ScoreboardPanel/ScoreboardVBox/ScoreScroll
+@onready var score_list: VBoxContainer = $Root/ScoreboardPanel/ScoreboardVBox/ScoreScroll/ScoreList
 @onready var charge_bar: ProgressBar = $Root/ChargePanel/ChargeBar
 @onready var charge_panel: Control = $Root/ChargePanel
+@onready var fps_label: Label = $Root/FpsLabel
+@onready var spawn_aim_panel: Control = $Root/SpawnAimPanel
+@onready var spawn_timer_label: Label = $Root/SpawnAimPanel/TimerLabel
+@onready var lock_indicator: Control = $Root/LockIndicator
+
+var _my_player_id: int = -1
+var _frame_count: int = 0
+var _fps_timer: float = 0.0
+
+func set_player_id(pid: int) -> void:
+	_my_player_id = pid
+
+func _process(delta: float) -> void:
+	# FPS counter — update once per second
+	_frame_count += 1
+	_fps_timer += delta
+	if _fps_timer >= 1.0:
+		fps_label.text = "FPS: %d" % _frame_count
+		_frame_count = 0
+		_fps_timer = 0.0
 
 func update_charge_bar(charge: float, visible_flag: bool) -> void:
 	charge_panel.visible = visible_flag
 	if visible_flag:
 		charge_bar.value = clamp(charge, 0.0, 1.0)
-		# Cyan at low charge, white at full — matches railgun beam color
 		charge_bar.modulate = Color(0.4, 0.9, 1.0).lerp(Color(1.0, 1.0, 1.0), charge)
 
 func update_kills(kills: int) -> void:
 	kills_label.text = "Kills: %d" % kills
 
-## `entries` is MatchState.get_all_scores(): Array[{player_id, name, score}],
-## already sorted highest-first.
+## Highlight the current player's row and scroll it into view.
 func update_scoreboard(is_open: bool, entries: Array[Dictionary]) -> void:
 	scoreboard_panel.visible = is_open
 	if not is_open:
@@ -34,7 +50,7 @@ func update_scoreboard(is_open: bool, entries: Array[Dictionary]) -> void:
 		for c in score_list.get_children():
 			score_list.remove_child(c)
 			c.queue_free()
-		for i in range(entries.size()):
+		for _i in range(entries.size()):
 			var row := HBoxContainer.new()
 			var name_lbl := Label.new()
 			name_lbl.name = "Name"
@@ -49,18 +65,28 @@ func update_scoreboard(is_open: bool, entries: Array[Dictionary]) -> void:
 			row.add_child(score_lbl)
 			score_list.add_child(row)
 
+	var my_row_y: float = 0.0
+	var row_h: float = 26.0
 	for i in range(entries.size()):
 		var row: HBoxContainer = score_list.get_child(i)
 		var name_lbl: Label = row.get_node("Name")
 		var score_lbl: Label = row.get_node("Score")
-		name_lbl.text = str(entries[i]["name"])
-		score_lbl.text = str(entries[i]["score"])
+		var entry: Dictionary = entries[i]
+		var is_me: bool = (entry["player_id"] == _my_player_id)
+		name_lbl.text = ("%s  ◀" if is_me else "%s") % str(entry["name"])
+		score_lbl.text = str(entry["score"])
+		row.modulate = Color(1.0, 1.0, 0.4, 1.0) if is_me else Color.WHITE
+		if is_me:
+			my_row_y = i * row_h
+
+	# Scroll so the current player is always visible in the centre of the list
+	await get_tree().process_frame
+	score_scroll.scroll_vertical = int(max(0.0, my_row_y - score_scroll.size.y * 0.4))
 
 func update_health(current: float, max_health: float) -> void:
 	health_bar.max_value = max_health
 	health_bar.value = current
 	health_label.text = "%d / %d" % [int(round(current)), int(round(max_health))]
-	# Flash red-ish as health drops so damage is felt without a separate popup system.
 	var t: float = clamp(current / max(max_health, 1.0), 0.0, 1.0)
 	health_bar.modulate = Color(1.0, 0.35, 0.3).lerp(Color(0.4, 0.95, 0.5), t)
 
@@ -69,7 +95,7 @@ func update_weapons(names: Array[String], colors: Array[Color], current_index: i
 		for c in weapon_list.get_children():
 			weapon_list.remove_child(c)
 			c.queue_free()
-		for i in range(names.size()):
+		for _i in range(names.size()):
 			var lbl := Label.new()
 			lbl.add_theme_font_size_override("font_size", 16)
 			weapon_list.add_child(lbl)
@@ -87,3 +113,23 @@ func update_weapons(names: Array[String], colors: Array[Color], current_index: i
 	else:
 		current_weapon_label.text = "-"
 		current_weapon_label.modulate = Color.WHITE
+
+## Called by Spawner during the aim window.
+func update_spawn_aim(candidate: OrbitalBody, timer: float, max_time: float) -> void:
+	spawn_aim_panel.visible = true
+	var remaining: float = max_time - timer
+	spawn_timer_label.text = "Choose a planet: %.1fs" % remaining
+
+## Called from Player each frame - shows lock-on state for Planet Buster.
+func update_lock_indicator(candidate: OrbitalBody, locked: OrbitalBody, lock_progress: float) -> void:
+	lock_indicator.visible = (candidate != null)
+	if candidate == null:
+		return
+	lock_indicator.modulate = Color.GREEN if locked != null else Color(1.0, 0.6, 0.1)
+	# The progress label reuses the lock_indicator's first Label child
+	var lbl: Label = lock_indicator.get_node_or_null("Label")
+	if lbl:
+		lbl.text = "LOCKED" if locked != null else ("%.0f%%" % (lock_progress * 100))
+
+func hide_spawn_aim() -> void:
+	spawn_aim_panel.visible = false

@@ -1,4 +1,4 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://scripts/world/Arena.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/world/OrbitalBody.tscn" id="2"]
@@ -8,6 +8,7 @@
 [ext_resource type="Environment" path="res://scenes/world/default_environment.tres" id="6"]
 [ext_resource type="PackedScene" path="res://scenes/world/JumpPad.tscn" id="7"]
 [ext_resource type="PackedScene" path="res://scenes/world/ArenaBoundary.tscn" id="8"]
+[ext_resource type="PackedScene" path="res://scenes/world/Tower.tscn" id="9"]
 
 [node name="Arena" type="Node3D"]
 script = ExtResource("1")
@@ -17,6 +18,7 @@ bot_scene = ExtResource("4")
 bot_count = 31
 planet_buster_pickup_scene = ExtResource("5")
 jump_pad_scene = ExtResource("7")
+tower_scene = ExtResource("9")
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = ExtResource("6")

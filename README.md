@@ -43,6 +43,9 @@ A Standard First Person Shooter Player Controller inspired by Quake 3 Arenas Fee
 	- Add a sniping scope to the rail gun that allows players to zoom in and aim more accurately.
 
 ### Next Steps:
+- GUI
+	- Add a FPS counter to the top left corner of the screen.
+	- Score Board: Make it scroll and have a max height of 80% of the screen, default scroll position with the current player highlighted and visible.
 - Planets:
 	- Allow Eliptical Orbits to form.
 	- Give each planet a random spin and axis tilt.
@@ -50,7 +53,9 @@ A Standard First Person Shooter Player Controller inspired by Quake 3 Arenas Fee
 	- Spawn a variety of Buildings with navigateable interiors on the Planets to provide places to seek cover and fire from.
 		- Spawn 0-3 Towers on each planet that can be used to gain a height advantage over other players. The tower height should be equal to the radius of the planet it is on.
 - Players and Bots:
-	- Weapons: 
+	- Weapons:
+		- General Update:
+			- Momentum of the projectiles should be on offset of the players current momentum when they fire the weapon. (for example if a player is moving forward and fires a rocket, the rocket should have a forward momentum in addition to its own speed so that it doesn't shoot behind the player if they are moving forward).
 		- New Weapons:
 			- The Space Board: 
 				- can only switch too when they are not on a planet.
@@ -60,6 +65,8 @@ A Standard First Person Shooter Player Controller inspired by Quake 3 Arenas Fee
 				- can be used to grapple onto planets or buildings and pull the player towards them.
 				- can be used to grapple onto other players and pull them towards the player.
 		- Update Existing Weapons:
+			- Rail Gun:
+				- Add a sniper scope model to the rail gun with a zoom in feature.
 			- Planet Buster: 
 				- Make the weapon crosshairs lock on a planet in its sites, then the weapon auto navigates to that planet. 
 				- Not able to target planets that are too close... (no suicide shots).
@@ -69,6 +76,7 @@ A Standard First Person Shooter Player Controller inspired by Quake 3 Arenas Fee
 				- Make the weapon a medium speed automatic. (hold fire button)
 			- Rocket Launcher:
 				- Deforms Planet Mesh in the blast radius on contact.
+				- add a particle effect smoke trail for the rockets.
 	- Spawning and Respawning:
 		- When a player spawns, they start facing the orbiting bodies from the outermost barrier. 
 			- They have 10 seconds to choose a target planet to launch towards, by holding the fire button while aiming at it.
@@ -83,3 +91,17 @@ A Standard First Person Shooter Player Controller inspired by Quake 3 Arenas Fee
 		- Make the Bots also seek out and target each other
 			- add a random variance range to bot attack accuracy with lower and upper bounds.
 			- for slower weapons have their shots lead the opponents movement.
+
+
+### For Avinash
+Bugs:
+
+* The player bounces when moving across a planet even when not jumping.
+* Sometimes when trying to stand still on a planet, the planet slides under  the player rather than the player staying stationary to the planet.
+* Sometimes when circumnavigating a planet, it feels like the player hits an invisible wall and is not able to move forward in a given direction.
+
+Improvements:
+
+* The grappling hook should shoot and release a cable when being used.
+* The boogie board should allow full freedom of movement in any direction.
+* The planet buster should only fire when locked onto a planet and start slow but have linear acceleration until it collides with the planet, updating its path every 1s.
