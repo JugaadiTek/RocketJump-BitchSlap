@@ -134,6 +134,7 @@ func _ready() -> void:
 	_build_jump_pads()
 	_build_buildings()
 	_build_health_packs()
+	_build_debris_field()
 
 	if NetworkManager.is_online:
 		NetworkManager.player_joined.connect(_on_player_joined)
@@ -328,6 +329,10 @@ func _build_buildings() -> void:
 				building.tower_width = clampf(body.radius * 0.28, 6.0, 11.0)
 			elif building is Bunker:
 				building.bunker_height = clampf(height_budget * 0.8, 3.0, 4.5)
+				# Footprint capped against the planet: an 11m bunker on a 5m
+				# pebble would wrap most of the way round it.
+				building.bunker_width = clampf(body.radius * 0.8, 5.0, 11.0)
+				building.bunker_depth = building.bunker_width * 0.72
 			# Lets the building work out how far the surface curves away beneath
 			# its flat base, so its foundation can fill that gap instead of
 			# leaving the outer corners hanging in the air.
@@ -367,6 +372,15 @@ func _build_health_packs() -> void:
 			var bx: Vector3 = dir.cross(ref).normalized()
 			var bz: Vector3 = bx.cross(dir).normalized()
 			pack.transform = Transform3D(Basis(bx, dir, bz), dir * (body.radius + 0.1))
+
+## Asteroid rubble filling the space between the planets. Built after the bodies
+## exist so it can steer clear of their orbital tracks.
+func _build_debris_field() -> void:
+	var field := DebrisField.new()
+	field.name = "DebrisField"
+	field.inner_radius = 60.0
+	field.outer_radius = GravityManager.ARENA_BOUNDARY_RADIUS * 0.96
+	add_child(field)
 
 func _spawn_bots() -> void:
 	if bot_scene == null:

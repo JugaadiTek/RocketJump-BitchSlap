@@ -58,6 +58,10 @@ func _build() -> void:
 				cut = Cutout.WINDOW
 			_add_wall(w["centre"], tower_width, floor_height, w["axis"], cut)
 
+		# A lamp per floor, offset away from the ladder shaft.
+		_add_interior_light(Vector3(-half * 0.35, y_base + floor_height * 0.72, -half * 0.35),
+			floor_height * 1.6, 1.8)
+
 	# The ladder runs from just above the ground to the top floor's slab, so
 	# stepping off the top rung puts you on the top floor.
 	_add_ladder(shaft_centre, 0.2, tower_height - floor_height * 0.5, ladder_shaft)
@@ -66,8 +70,31 @@ func _build() -> void:
 	_add_box(Vector3(0.0, tower_height + floor_thickness * 0.5, 0.0),
 		Vector3(tower_width, floor_thickness, tower_width), _tint * 0.82)
 
+	_add_roof_flag(tower_height + floor_thickness)
+
 	# Plinth sinking the flat base into the curved surface.
 	_add_foundation(half, half)
+
+## Mast and pennant on the roof - the silhouette detail that makes a planet's
+## skyline read as occupied at a distance.
+func _add_roof_flag(base_y: float) -> void:
+	var mast_height: float = clampf(tower_height * 0.22, 1.6, 4.5)
+	_add_box(Vector3(0.0, base_y + mast_height * 0.5, 0.0),
+		Vector3(0.12, mast_height, 0.12), Color(0.7, 0.7, 0.75), false)
+	var flag := MeshInstance3D.new()
+	var flag_mesh := BoxMesh.new()
+	flag_mesh.size = Vector3(mast_height * 0.55, mast_height * 0.32, 0.05)
+	flag.mesh = flag_mesh
+	var flag_mat := StandardMaterial3D.new()
+	var flag_color := Color(0.85, 0.12, 0.16) if randf() < 0.6 else Color(0.15, 0.4, 0.9)
+	flag_mat.albedo_color = flag_color
+	flag_mat.emission_enabled = true
+	flag_mat.emission = flag_color
+	flag_mat.emission_energy_multiplier = 0.8
+	flag_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	flag.material_override = flag_mat
+	flag.transform = _surface_transform(Vector3(mast_height * 0.32, base_y + mast_height * 0.82, 0.0))
+	add_child(flag)
 
 func footprint_radius() -> float:
 	return tower_width * 0.7072

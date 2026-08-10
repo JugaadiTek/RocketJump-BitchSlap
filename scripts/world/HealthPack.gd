@@ -40,6 +40,7 @@ func _on_body_entered(body: Node3D) -> void:
 		return
 	if not body.heal(heal_amount):
 		return
+	Sfx.play_3d("health", global_position, 1.0, -2.0)
 	_set_available(false)
 	await get_tree().create_timer(respawn_time).timeout
 	if is_instance_valid(self):

@@ -33,6 +33,10 @@ func _build() -> void:
 	# line of sight against rather than being one empty room.
 	_add_box(Vector3(0.0, 0.6, 0.0), Vector3(bunker_width * 0.35, 1.2, bunker_depth * 0.3), _tint * 1.08)
 
+	# Two lamps so the single room isn't lit from a single hard point.
+	_add_interior_light(Vector3(-bunker_width * 0.28, bunker_height * 0.78, 0.0), bunker_width, 1.5)
+	_add_interior_light(Vector3(bunker_width * 0.28, bunker_height * 0.78, 0.0), bunker_width, 1.5)
+
 	# Plinth sinking the flat base into the curved surface.
 	_add_foundation(bunker_width * 0.5, bunker_depth * 0.5)
 

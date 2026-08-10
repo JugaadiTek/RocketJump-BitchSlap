@@ -7,6 +7,76 @@ in [`tests/`](../tests) — see **Test harness** at the bottom.
 
 ---
 
+## 2026-08-11 — Session 4: physicality and presentation
+
+### World look
+- **Brightness landed between the two previous passes.** Nebula intensity
+  0.85 → 1.35 and recoloured to the concept art's violet/blue/magenta, space
+  colour lifted off pure black to a deep indigo, ambient 0.3 → 0.5, exposure
+  1.05 → 1.15, contrast 1.35 → 1.2, saturation 1.18 → 1.32.
+- **Faceted low-poly planets**, matching the concept art. The surface is rebuilt
+  as a deindexed, flat-shaded ArrayMesh — with no shared vertices every triangle
+  gets its own normal instead of a smoothed average. Tessellation (36×18) is a
+  deliberate balance: coarse enough to read as facets, fine enough that a crater
+  still has vertices to displace.
+- **Atmospheric rim glow** per planet: an emissive shell just above the surface
+  with front faces culled, so what shows through the limb is the shell's far side.
+- **Orbit rings** tracing every body's path, parented to the *pivot* so a moon's
+  ring travels with its parent planet. Refreshed when an orbit is perturbed
+  enough to matter.
+- **Asteroid debris field** — 900 rocks in one MultiMesh draw call, flattened
+  toward the orbital plane and nudged clear of every planet's track.
+- **Flags on tower roofs**, the silhouette detail that makes a skyline read as
+  occupied from orbit.
+
+### Craters are now real terrain
+`apply_crater()` rebuilds the collider as a `ConcavePolygonShape3D` from the
+deformed vertices, so you can walk down into one. Measured: **surface under the
+impact dropped 1.05 m** in the collision world, not just visually. Rebuilds are
+coalesced on a 0.6 s timer — a respawn wave cratering one planet several times
+pays for one rebuild, not five.
+
+### Buildings
+- **Wrapped onto the sphere.** A building is authored flat, then every piece is
+  remapped onto the surface and tilted to the local normal
+  (`Building._surface_transform`); pieces wide enough to sag past 0.25 m are split
+  into segments first. **548 of 848 pieces are tilted, up to 33.4°** — the
+  untilted remainder are the ones on the centre line, which correctly need none.
+  Collision follows the same mapping, so the curve is physical too.
+  Verified no building floats: deepest geometry sits **0.95 m below** the surface.
+- **Interior lights** — one warm lamp per tower floor, two per bunker, each with a
+  small emissive panel so windows glow from outside. 24 across the arena.
+- **Towers break on impact.** A planet-on-planet structural collision now shears
+  off the buildings caught in it, with a debris burst and a rubble footprint left
+  as cover. Only the ones facing the contact point: measured **2 demolished, 1
+  still standing** on the far side. The body's `structure_reach` is recomputed
+  afterwards so a flattened planet stops registering contacts it can no longer
+  physically make.
+
+### Audio
+New `Sfx` autoload: **16 sounds, synthesised at startup** rather than loaded, so
+the project still ships no audio assets. Each is built from noise bursts, pitch
+sweeps and FM tones packed into 16-bit PCM, with soft clipping and short fades
+(a buffer starting mid-waveform clicks on every play).
+
+Variation is applied at *playback*, not baked as multiple takes — `play_3d()`
+jitters pitch and volume per shot, so full-auto fire never sounds like one click
+stamped out repeatedly. Genuinely dynamic cases: the railgun's charge whine rises
+in pitch with charge and its shot deepens and loudens with it; the planet-shatter
+boom pitches down with planet radius; the landing thump scales with impact speed.
+32 pooled `AudioStreamPlayer3D` voices give distance attenuation and panning, and
+recycle round-robin so a firefight degrades instead of allocating without bound.
+
+### Controls
+- **The Bitchslap moved from `F` to `V`.**
+
+### Note
+A shutdown warning about ~20 leaked ObjectDB instances is 23 orphan `StringName`
+entries for the audio bus name `Master` — an engine-side artifact of initialising
+the audio server, not leaked nodes.
+
+---
+
 ## 2026-08-11 — Session 3: world detail pass
 
 ### Spawning

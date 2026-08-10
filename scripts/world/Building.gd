@@ -11,6 +11,15 @@ extends Node3D
 ## enterable: a single body-sized collision box would fill the inside, so walls
 ## have to be collided with individually.
 ##
+## _add_box() also WRAPS each piece onto the planet. A building is authored flat,
+## as if on a tangent plane, then every piece is remapped onto the sphere and
+## tilted to the local normal (see _surface_transform). Pieces wide enough to
+## visibly sag are split into segments first, so a floor slab follows the
+## curvature instead of cutting a chord through it. On a small planet, where a
+## building can span a serious fraction of the circumference, this is the
+## difference between a structure that sits on the world and one that stabs
+## through it.
+##
 ## Subclasses override _build(). Set exported properties BEFORE add_child() -
 ## add_child() runs _ready() synchronously, and _ready() builds the geometry, so
 ## anything assigned afterwards is silently ignored.
@@ -29,8 +38,15 @@ extends Node3D
 
 enum Cutout { NONE, DOOR, WINDOW }
 
+## How far a piece may sag away from the true surface before it gets subdivided.
+const CURVE_TOLERANCE: float = 0.25
+## Cap on subdivision per axis, so a big slab on a tiny planet can't explode into
+## hundreds of boxes.
+const MAX_CURVE_SEGMENTS: int = 5
+
 var _body: StaticBody3D
 var _tint: Color = Color.WHITE
+var _demolished: bool = false
 
 func _ready() -> void:
 	_body = StaticBody3D.new()
@@ -69,15 +85,89 @@ func _add_foundation(half_x: float, half_z: float) -> void:
 	_add_box(Vector3(0.0, -depth * 0.18, 0.0),
 		Vector3(half_x * 2.3, depth * 0.36, half_z * 2.3), _tint * 0.78)
 
+## Brings the building down. Called when the planet it stands on grinds against
+## another planet's structures - the towers involved shear off rather than
+## clipping through each other.
+func demolish() -> void:
+	if _demolished:
+		return
+	_demolished = true
+	Sfx.play_3d("collapse", global_position, 1.0, 6.0)
+	_spawn_rubble()
+	# Collision first, so nothing is left standing invisibly in the way.
+	for child in _body.get_children():
+		child.queue_free()
+	for child in get_children():
+		if child is MeshInstance3D or child is OmniLight3D or child is Ladder:
+			child.queue_free()
+
+func is_demolished() -> bool:
+	return _demolished
+
+func _spawn_rubble() -> void:
+	var debris := GPUParticles3D.new()
+	add_child(debris)
+	var mat := ParticleProcessMaterial.new()
+	mat.direction = Vector3(0, 1, 0)
+	mat.spread = 75.0
+	mat.initial_velocity_min = 4.0
+	mat.initial_velocity_max = 18.0
+	mat.gravity = Vector3(0, -6, 0)
+	mat.scale_min = 0.3
+	mat.scale_max = 1.4
+	mat.angular_velocity_min = -220.0
+	mat.angular_velocity_max = 220.0
+	mat.color = _tint
+	debris.process_material = mat
+	debris.draw_pass_1 = BoxMesh.new()
+	debris.amount = 90
+	debris.lifetime = 3.5
+	debris.one_shot = true
+	debris.explosiveness = 0.9
+	debris.emitting = true
+	debris.local_coords = false
+
+	# A flattened footprint left behind, so the site still reads as cover.
+	var fp: float = footprint_radius() * 0.7
+	_add_box(Vector3(0.0, 0.35, 0.0), Vector3(fp, 0.7, fp), _tint * 0.6)
+
 ## Tallest point above the surface, used to work out when two planets have
 ## brought their structures into contact (see GravityManager).
 func structure_height() -> float:
 	return 4.0
 
-## One solid piece: a visible box plus matching collision on the shared body.
+## One solid piece, wrapped onto the planet: split into as many segments as the
+## curvature needs, each placed and tilted to sit on the real surface.
 func _add_box(pos: Vector3, size: Vector3, color: Color, solid: bool = true) -> void:
 	if size.x <= 0.01 or size.y <= 0.01 or size.z <= 0.01:
 		return
+	var segs_x: int = _segments_for(size.x)
+	var segs_z: int = _segments_for(size.z)
+	var step := Vector3(size.x / float(segs_x), size.y, size.z / float(segs_z))
+	for ix in range(segs_x):
+		for iz in range(segs_z):
+			var offset := Vector3(
+				(float(ix) + 0.5) * step.x - size.x * 0.5,
+				0.0,
+				(float(iz) + 0.5) * step.z - size.z * 0.5)
+			_emit_piece(pos + offset, step, color, solid)
+
+## How many segments a span of `extent` needs before its chord sits within
+## CURVE_TOLERANCE of the real surface.
+func _segments_for(extent: float) -> int:
+	if host_radius <= 0.01 or extent <= 0.01:
+		return 1
+	for n in range(1, MAX_CURVE_SEGMENTS + 1):
+		var half: float = extent / float(n) * 0.5
+		if half >= host_radius:
+			continue
+		var sag: float = host_radius - sqrt(maxf(host_radius * host_radius - half * half, 0.0))
+		if sag <= CURVE_TOLERANCE:
+			return n
+	return MAX_CURVE_SEGMENTS
+
+func _emit_piece(pos: Vector3, size: Vector3, color: Color, solid: bool) -> void:
+	var xform: Transform3D = _surface_transform(pos)
 	var mi := MeshInstance3D.new()
 	add_child(mi)
 	var bm := BoxMesh.new()
@@ -87,15 +177,64 @@ func _add_box(pos: Vector3, size: Vector3, color: Color, solid: bool = true) -> 
 	mat.albedo_color = color
 	mat.roughness = 0.85
 	mi.material_override = mat
-	mi.position = pos
+	mi.transform = xform
 	if not solid:
 		return
 	var cshape := CollisionShape3D.new()
 	var box := BoxShape3D.new()
 	box.size = size
 	cshape.shape = box
-	cshape.position = pos
+	cshape.transform = xform
 	_body.add_child(cshape)
+
+## Maps a position authored on a flat tangent plane onto the actual sphere.
+##
+## The building's origin sits on the surface with +Y radially out, so the planet
+## centre is at local (0, -host_radius, 0). A point `local_pos` is treated as
+## "walk `arc` metres across the surface, then rise `y` metres" - the horizontal
+## offset becomes an arc angle rather than a straight chord, and the piece is
+## rotated so its own up matches the surface normal there.
+func _surface_transform(local_pos: Vector3) -> Transform3D:
+	var r: float = host_radius
+	var flat := Vector3(local_pos.x, 0.0, local_pos.z)
+	var arc: float = flat.length()
+	if r <= 0.01 or arc < 0.0001:
+		return Transform3D(Basis(), local_pos)
+	var axis: Vector3 = Vector3.UP.cross(flat / arc)
+	if axis.length_squared() < 0.000001:
+		return Transform3D(Basis(), local_pos)
+	axis = axis.normalized()
+	var dir: Vector3 = Vector3.UP.rotated(axis, arc / r)
+	var centre := Vector3(0.0, -r, 0.0)
+	return Transform3D(Basis(Quaternion(Vector3.UP, dir)), centre + dir * (r + local_pos.y))
+
+## Warm interior light. Buildings read as inhabited from outside and are
+## actually navigable inside, rather than being black boxes you enter blind.
+func _add_interior_light(pos: Vector3, range_m: float, energy: float = 1.6) -> void:
+	var lamp := OmniLight3D.new()
+	lamp.light_color = Color(1.0, 0.82, 0.55)
+	lamp.light_energy = energy
+	lamp.omni_range = range_m
+	# Shadows off: a handful of these per building across a dozen buildings is
+	# cheap only as long as none of them are casting.
+	lamp.shadow_enabled = false
+	lamp.transform = _surface_transform(pos)
+	add_child(lamp)
+	# A small emissive panel so the light source is visible, and so the windows
+	# glow from outside the way the concept art's structures do.
+	var bulb := MeshInstance3D.new()
+	var bulb_mesh := BoxMesh.new()
+	bulb_mesh.size = Vector3(0.35, 0.1, 0.35)
+	bulb.mesh = bulb_mesh
+	var bulb_mat := StandardMaterial3D.new()
+	bulb_mat.albedo_color = Color(1.0, 0.9, 0.7)
+	bulb_mat.emission_enabled = true
+	bulb_mat.emission = Color(1.0, 0.82, 0.55)
+	bulb_mat.emission_energy_multiplier = 4.0
+	bulb_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bulb.material_override = bulb_mat
+	bulb.transform = _surface_transform(pos)
+	add_child(bulb)
 
 ## A wall panel spanning `span` metres horizontally, `height` tall, centred on
 ## `center`. `axis` is the axis the wall RUNS ALONG ("x" or "z"); its thickness

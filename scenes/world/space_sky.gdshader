@@ -5,15 +5,16 @@ shader_type sky;
 // needs no external texture and looks the same regardless of resolution.
 
 uniform float star_density : hint_range(0.0, 1.0) = 0.9;
-uniform float star_brightness : hint_range(0.0, 12.0) = 8.0;
+uniform float star_brightness : hint_range(0.0, 12.0) = 7.0;
 uniform float star_size : hint_range(1.0, 12.0) = 5.0;  // lower = bigger stars
-uniform float nebula_intensity : hint_range(0.0, 3.0) = 0.85;
-uniform vec4 space_color : source_color = vec4(0.0, 0.0, 0.003, 1.0);
-// Deep and cold rather than pink: the nebula should read as faint distant gas
-// behind the stars, not as a magenta wash competing with the planets.
-uniform vec4 nebula_color_a : source_color = vec4(0.10, 0.06, 0.30, 1.0);
-uniform vec4 nebula_color_b : source_color = vec4(0.03, 0.16, 0.38, 1.0);
-uniform vec4 nebula_color_c : source_color = vec4(0.24, 0.09, 0.16, 1.0);
+uniform float nebula_intensity : hint_range(0.0, 3.0) = 1.35;
+uniform vec4 space_color : source_color = vec4(0.016, 0.01, 0.045, 1.0);
+// Deep violet void with vivid cloud cores, matching the concept art: richer
+// than a near-black sky, but nowhere near the flat magenta wash that reading
+// the nebula too brightly produces.
+uniform vec4 nebula_color_a : source_color = vec4(0.42, 0.12, 0.62, 1.0);
+uniform vec4 nebula_color_b : source_color = vec4(0.08, 0.24, 0.58, 1.0);
+uniform vec4 nebula_color_c : source_color = vec4(0.55, 0.14, 0.34, 1.0);
 
 float hash13(vec3 p) {
 	p = fract(p * 0.3183099 + 0.1);
@@ -82,9 +83,9 @@ void sky() {
 	// Higher exponents than a natural falloff would use: they crush the faint
 	// haze to true black while leaving the cloud cores bright, which is what
 	// gives the backdrop its contrast rather than an even purple wash.
-	vec3 nebula = nebula_color_a.rgb * pow(clamp(n1, 0.0, 1.0), 3.0);
-	nebula += nebula_color_b.rgb * pow(clamp(n2, 0.0, 1.0), 3.4) * 0.9;
-	nebula += nebula_color_c.rgb * pow(clamp(n3, 0.0, 1.0), 3.8) * 0.7;
+	vec3 nebula = nebula_color_a.rgb * pow(clamp(n1, 0.0, 1.0), 2.6);
+	nebula += nebula_color_b.rgb * pow(clamp(n2, 0.0, 1.0), 3.0) * 0.9;
+	nebula += nebula_color_c.rgb * pow(clamp(n3, 0.0, 1.0), 3.4) * 0.7;
 	nebula *= nebula_intensity;
 
 	// Two star layers at different scales read as both "distant haze" and

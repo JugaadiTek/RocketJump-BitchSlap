@@ -102,6 +102,8 @@ var _platform_velocity: Vector3 = Vector3.ZERO
 var _ladder: Node3D = null
 ## Eased "up", chasing the raw target from _get_up_direction() - see _smoothed_up.
 var _up_smoothed: Vector3 = Vector3.ZERO
+var _was_grounded: bool = true
+var _airborne_speed: float = 0.0
 
 ## Grappling cable state, written by GrapplingHook and read by HookVisual.
 ## Replicated (see _setup_replication) so everyone can see who is grappling
@@ -516,12 +518,22 @@ func _apply_movement(up: Vector3, delta: float) -> void:
 	var vel_up: float = velocity.dot(up)
 	var vel_horizontal: Vector3 = velocity - up * vel_up
 
+	# Landing thump, scaled by impact speed. Tracked here rather than from
+	# is_on_floor() alone so a hard rocket-jump landing sounds different from
+	# stepping off a kerb.
+	var grounded: bool = is_on_floor()
+	if grounded and not _was_grounded and _airborne_speed > 6.0:
+		Sfx.play_3d("land", global_position, 1.0, clampf(-18.0 + _airborne_speed * 0.5, -18.0, 2.0))
+	_was_grounded = grounded
+	_airborne_speed = 0.0 if grounded else maxf(_airborne_speed, absf(vel_up))
+
 	if is_on_floor():
 		vel_horizontal = _apply_friction(vel_horizontal, ground_friction, delta)
 		vel_horizontal = _q3_accelerate(wish_dir, max_ground_speed, ground_accel, vel_horizontal, delta)
 		if _wants_jump():
 			var g_mag: float = max(current_gravity.length(), 4.0)
 			vel_up = sqrt(2.0 * g_mag * jump_height)
+			Sfx.play_3d("jump", global_position, 1.0, -12.0)
 		else:
 			# Discard any leftover outward speed while grounded. Running over a
 			# curved, moving surface keeps generating small positive vel_up from
@@ -629,7 +641,7 @@ func _q3_air_accelerate(wish_dir: Vector3, wish_speed: float, accel: float, spee
 ## hand-authored resource format that's sensitive to exact Godot-build
 ## property sets and can silently fail on a different engine version - so
 ## gameplay-critical input intentionally does not depend on it at all here.
-## WASD / Space / F / number keys / mouse buttons are effectively hardcoded;
+## WASD / Space / V / number keys / mouse buttons are effectively hardcoded;
 ## remapping them means editing the keycodes below.
 func _get_move_axis() -> Vector2:
 	return Vector2(
@@ -659,7 +671,7 @@ func _wants_scoreboard() -> bool:
 	return Input.is_physical_key_pressed(KEY_TAB)
 
 func _wants_melee() -> bool:
-	return _just_pressed("melee", Input.is_physical_key_pressed(KEY_F))
+	return _just_pressed("melee", Input.is_physical_key_pressed(KEY_V))
 
 func _get_weapon_switch() -> int:
 	if _just_pressed("wpn0", Input.is_physical_key_pressed(KEY_1)):

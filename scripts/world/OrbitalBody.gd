@@ -50,6 +50,18 @@ var _orbit_angle: float = 0.0
 var structure_reach: float = 0.0
 var collision_cooldown: float = 0.0
 ## Baked surface geometry, populated the first time apply_crater() runs.
+## Collider rebuilds are coalesced: several craters landing within this window
+## produce one triangle-mesh rebuild instead of one each.
+const COLLIDER_REBUILD_INTERVAL: float = 0.6
+## Surface tessellation. Coarse enough to read as facets, fine enough that a
+## crater still has vertices to displace.
+const SURFACE_SEGMENTS: int = 36
+const SURFACE_RINGS: int = 18
+var _atmosphere: MeshInstance3D = null
+var _orbit_ring: MeshInstance3D = null
+var _ring_drawn_radius: float = 0.0
+var _collider_dirty: bool = false
+var _collider_rebuild_delay: float = COLLIDER_REBUILD_INTERVAL
 var _crater_arrays: Array = []
 var _crater_vertices: PackedVector3Array = PackedVector3Array()
 ## Bodies with eccentricity use semi-major (orbit_radius) and semi-minor
@@ -82,25 +94,126 @@ func _ready() -> void:
 	# means that stays true if the scene is ever reordered.
 	process_physics_priority = -10
 	_prev_global_transform = global_transform
+	_add_atmosphere_shell()
+	_add_orbit_ring()
+	_rebuild_faceted_surface()
+
+## Faint ring tracing this body's orbital path, the way the concept art draws
+## every world on a visible track. Parented to the PIVOT rather than to us, so a
+## moon's ring travels with its parent planet instead of being pinned to the
+## arena centre.
+func _add_orbit_ring() -> void:
+	if orbit_pivot == null or orbit_radius <= 0.01:
+		return
+	_orbit_ring = MeshInstance3D.new()
+	var ring := TorusMesh.new()
+	ring.rings = 96
+	ring.ring_segments = 4
+	_orbit_ring.mesh = ring
+	var ring_mat := StandardMaterial3D.new()
+	ring_mat.albedo_color = Color(0.55, 0.65, 1.0, 0.16)
+	ring_mat.emission_enabled = true
+	ring_mat.emission = Color(0.5, 0.68, 1.0)
+	ring_mat.emission_energy_multiplier = 0.9
+	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ring_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	ring_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_orbit_ring.material_override = ring_mat
+	_orbit_ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	orbit_pivot.add_child(_orbit_ring)
+	_refresh_orbit_ring()
+
+## TorusMesh lies in its own XZ plane with +Y as the axis, so aligning the ring
+## to the orbit is just a matter of pointing its Y at orbit_axis.
+func _refresh_orbit_ring() -> void:
+	if _orbit_ring == null or not is_instance_valid(_orbit_ring):
+		return
+	var ring: TorusMesh = _orbit_ring.mesh
+	var thickness: float = clampf(orbit_radius * 0.0025, 0.12, 0.6)
+	ring.inner_radius = maxf(orbit_radius - thickness, 0.01)
+	ring.outer_radius = orbit_radius + thickness
+	var axis: Vector3 = orbit_axis.normalized()
+	_orbit_ring.transform = Transform3D(Basis(Quaternion(Vector3.UP, axis)), Vector3.ZERO)
+	_ring_drawn_radius = orbit_radius
+
+## Thin emissive shell just above the surface, rendered inside-out so only the
+## limb shows through - the atmospheric rim glow every planet has in the concept
+## art. Front faces are culled, so what you see is the shell's FAR side around
+## the planet's edge; that band of backfaces is the glow.
+func _add_atmosphere_shell() -> void:
+	_atmosphere = MeshInstance3D.new()
+	_atmosphere.mesh = SphereMesh.new()
+	var tint: Color = Color(0.45, 0.62, 1.0)
+	var surface_mat := mesh.get_surface_override_material(0)
+	if surface_mat is StandardMaterial3D:
+		tint = (surface_mat as StandardMaterial3D).albedo_color.lerp(Color(0.5, 0.7, 1.0), 0.55)
+	var shell_mat := StandardMaterial3D.new()
+	shell_mat.albedo_color = Color(tint.r, tint.g, tint.b, 0.16)
+	shell_mat.emission_enabled = true
+	shell_mat.emission = tint
+	shell_mat.emission_energy_multiplier = 1.4
+	shell_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	shell_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	shell_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	shell_mat.cull_mode = BaseMaterial3D.CULL_FRONT
+	_atmosphere.material_override = shell_mat
+	_atmosphere.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_atmosphere)
+	_resize_atmosphere()
+
+func _resize_atmosphere() -> void:
+	var shell_mesh: SphereMesh = _atmosphere.mesh
+	shell_mesh.radius = radius * 1.05
+	shell_mesh.height = radius * 2.1
+	shell_mesh.radial_segments = 24
+	shell_mesh.rings = 12
 
 func _apply_visual_scale() -> void:
 	if not is_inside_tree():
 		return
-	# Once the surface has been cratered the mesh is a baked ArrayMesh with no
-	# radius to set; resizing then would also wipe the craters, so skip it.
-	if mesh and mesh.mesh is SphereMesh:
-		mesh.mesh.radius = radius
-		mesh.mesh.height = radius * 2.0
 	if collision and collision.shape is SphereShape3D:
 		collision.shape.radius = radius
+	# Craters edit the surface in place, so regenerating it from a fresh sphere
+	# would wipe them. Only rebuild while the surface is still pristine - which
+	# is exactly the case that matters, since the only late radius changes come
+	# from freshly-spawned shatter fragments.
+	if _crater_vertices.is_empty():
+		_rebuild_faceted_surface()
+	if _atmosphere:
+		_resize_atmosphere()
 
-## Dents the visible surface where something slammed into it.
+## Rebuilds the surface as flat-shaded facets - the chunky low-poly look the
+## concept art uses. Deindexing before generating normals is what does it: with
+## no shared vertices every triangle gets its own normal instead of a smoothed
+## average. It also leaves an editable ArrayMesh, which is what apply_crater()
+## needs anyway.
 ##
-## The mesh starts life as a SphereMesh primitive, which has no vertices to
-## move, so the first crater bakes it down to an ArrayMesh we then keep editing
-## in place. Purely cosmetic: the collision stays a perfect SphereShape3D, so
-## players walk over a crater rather than down into it - giving craters real
-## collision would mean rebuilding a ~1200-triangle concave shape per impact.
+## Tessellation is a balance: coarse enough to read as facets, fine enough that
+## a crater has vertices to actually move (at 36x18 the spacing on the largest
+## planet is ~7.7m, just under the biggest crater radius).
+func _rebuild_faceted_surface() -> void:
+	if mesh == null:
+		return
+	var sphere := SphereMesh.new()
+	sphere.radius = radius
+	sphere.height = radius * 2.0
+	sphere.radial_segments = SURFACE_SEGMENTS
+	sphere.rings = SURFACE_RINGS
+	var st := SurfaceTool.new()
+	st.create_from(sphere, 0)
+	st.deindex()
+	st.generate_normals()
+	mesh.mesh = st.commit()
+
+## Dents the surface where something slammed into it - visibly AND physically.
+##
+## The mesh starts as a faceted ArrayMesh baked in _ready(), so there are real
+## vertices to push. The collider is rebuilt from those same vertices as a
+## ConcavePolygonShape3D, which is what lets players actually walk down into a
+## crater. That rebuild is the expensive half, so it is deferred and coalesced
+## (see _physics_process): a busy respawn wave cratering the same planet several
+## times in one second pays for one rebuild, not five.
 func apply_crater(world_point: Vector3, crater_radius: float, depth: float) -> void:
 	if is_shattered or mesh == null or crater_radius <= 0.01:
 		return
@@ -132,6 +245,7 @@ func apply_crater(world_point: Vector3, crater_radius: float, depth: float) -> v
 
 	_crater_arrays[Mesh.ARRAY_VERTEX] = _crater_vertices
 	_rebuild_cratered_mesh()
+	_collider_dirty = true
 
 func _ensure_deformable_mesh() -> void:
 	if not _crater_vertices.is_empty():
@@ -152,6 +266,20 @@ func _rebuild_cratered_mesh() -> void:
 	st.generate_normals()
 	mesh.mesh = st.commit()
 
+## Swaps the perfect SphereShape3D for a triangle mesh built from the cratered
+## surface, so craters are walkable terrain rather than paint. Only ever called
+## from the coalescing timer in _physics_process - rebuilding a couple of
+## thousand triangles is far too expensive to do per impact.
+func _rebuild_collider() -> void:
+	if mesh == null or mesh.mesh == null:
+		return
+	var faces: PackedVector3Array = mesh.mesh.get_faces()
+	if faces.is_empty():
+		return
+	var shape := ConcavePolygonShape3D.new()
+	shape.set_faces(faces)
+	collision.shape = shape
+
 func _physics_process(delta: float) -> void:
 	if is_shattered:
 		motion_delta = Transform3D.IDENTITY
@@ -165,6 +293,16 @@ func _physics_process(delta: float) -> void:
 		rotate(spin_axis.normalized(), spin_speed * delta)
 	if collision_cooldown > 0.0:
 		collision_cooldown -= delta
+	# Orbits drift on every spawn landing and jump on a structural collision;
+	# refresh the drawn ring once the difference would actually be visible.
+	if _orbit_ring and absf(orbit_radius - _ring_drawn_radius) > maxf(orbit_radius * 0.01, 0.25):
+		_refresh_orbit_ring()
+	if _collider_dirty:
+		_collider_rebuild_delay -= delta
+		if _collider_rebuild_delay <= 0.0:
+			_collider_dirty = false
+			_collider_rebuild_delay = COLLIDER_REBUILD_INTERVAL
+			_rebuild_collider()
 	_update_motion_delta(delta)
 
 ## Records a building's height so GravityManager knows how far this body's
@@ -249,12 +387,35 @@ func structural_collision(other: OrbitalBody) -> void:
 
 	var contact: Vector3 = global_position + (other.global_position - global_position).normalized() * radius
 	apply_crater(contact, clampf(radius * 0.3, 2.0, 12.0), clampf(radius * 0.1, 0.8, 4.0))
+	_demolish_structures_near(contact, other)
 	collision_cooldown = 3.0
+
+## Shears off the buildings actually caught in the encounter - the ones on the
+## hemisphere facing the other planet, within reach of its structures. Buildings
+## on the far side are untouched.
+func _demolish_structures_near(contact: Vector3, other: OrbitalBody) -> void:
+	var reach: float = structure_reach + other.structure_reach + other.radius * 0.5
+	var tallest_left: float = 0.0
+	for child in get_children():
+		if not (child is Building):
+			continue
+		var building: Building = child
+		if building.is_demolished():
+			continue
+		if building.global_position.distance_to(contact) <= reach:
+			building.demolish()
+		else:
+			tallest_left = maxf(tallest_left, building.structure_height())
+	# Recompute how far this body's structures now stick out, so a flattened
+	# planet stops registering contacts it can no longer physically make.
+	structure_reach = tallest_left
 
 func shatter(blast_radius: float, blast_damage: float) -> void:
 	if is_shattered:
 		return
 	is_shattered = true
+	# Scaled by size: a moon cracks, a 44m world detonates.
+	Sfx.play_3d("planet_shatter", global_position, clampf(30.0 / maxf(radius, 1.0), 0.45, 1.6), 10.0, 0.05)
 	shattered.emit(self)
 	static_body.set_collision_layer_value(1, false)
 	static_body.set_collision_mask_value(1, false)

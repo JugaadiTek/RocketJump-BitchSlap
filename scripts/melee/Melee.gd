@@ -44,6 +44,7 @@ func try_activate() -> void:
 	if target == null:
 		return
 	_cooldown_remaining = cooldown
+	Sfx.play_3d("slap", _player.global_position, 1.0, 2.0)
 	_run_sequence(target)
 
 func _find_target() -> Player:

@@ -49,6 +49,10 @@ func _ready() -> void:
 	_test_health_packs()
 	_test_spin_axes()
 	await _test_structural_collision()
+	await _test_crater_collider()
+	_test_curved_and_lit()
+	_test_audio()
+	_test_decor()
 	get_tree().quit()
 
 ## Bodies must not intersect, and nothing may sit outside the arena boundary.
@@ -179,10 +183,11 @@ func _test_spawn_and_crater() -> void:
 	_log("CRATER  %d planets have had their mesh deformed by landings" % cratered)
 
 
-## Buildings must not float: with a flat base on a curved planet, the outer
-## corners hang by the sagitta unless a foundation fills that gap.
+## Buildings must not float. Measured in world space against the planet centre,
+## because pieces are now wrapped onto the sphere - a piece's local Y is no
+## longer "height above the base", so the old flat measurement was meaningless.
 func _test_foundations() -> void:
-	var worst_gap: float = 0.0
+	var worst_gap: float = -INF
 	var worst: String = ""
 	var checked: int = 0
 	for body in GravityManager.get_bodies():
@@ -190,20 +195,25 @@ func _test_foundations() -> void:
 			if not (child is Building):
 				continue
 			checked += 1
-			var footprint: float = child.footprint_radius()
-			# Lowest point of geometry, measured along the building's own down
-			# axis, versus where the planet surface actually is at that corner.
-			var sagitta: float = body.radius - sqrt(maxf(body.radius * body.radius - footprint * footprint, 0.0))
-			var lowest: float = 0.0
+			var lowest: float = INF
 			for piece in child.get_children():
-				if piece is MeshInstance3D and piece.mesh is BoxMesh:
-					lowest = minf(lowest, piece.position.y - piece.mesh.size.y * 0.5)
-			# A gap remains only if the geometry stops short of the corner drop.
-			var gap: float = sagitta - (-lowest)
+				if not (piece is MeshInstance3D) or not (piece.mesh is BoxMesh):
+					continue
+				var half: Vector3 = (piece.mesh as BoxMesh).size * 0.5
+				for sx in [-1.0, 1.0]:
+					for sy in [-1.0, 1.0]:
+						for sz in [-1.0, 1.0]:
+							var corner: Vector3 = piece.global_transform * Vector3(half.x * sx, half.y * sy, half.z * sz)
+							lowest = minf(lowest, corner.distance_to(body.global_position))
+			if lowest == INF:
+				continue
+			# Positive means the lowest geometry stops short of the surface, i.e.
+			# the building is hanging in the air.
+			var gap: float = lowest - body.radius
 			if gap > worst_gap:
 				worst_gap = gap
-				worst = "%s/%s" % [body.name, child.get_class()]
-	_log("FOUNDATION %d buildings; largest remaining corner gap %.2fm%s" % [
+				worst = "%s/%s" % [body.name, "Tower" if child is Tower else "Bunker"]
+	_log("FOUNDATION %d buildings; deepest geometry vs surface, worst case %+.2fm%s" % [
 		checked, worst_gap, (" (" + worst + ")") if worst != "" else ""])
 
 func _test_health_packs() -> void:
@@ -258,3 +268,99 @@ func _test_structural_collision() -> void:
 		b.name, before["b_r"], b.orbit_radius, before["b_s"], b.orbit_speed])
 	_log("IMPACT  both cooldowns armed (a=%.1fs b=%.1fs) so one encounter registers once" % [
 		a.collision_cooldown, b.collision_cooldown])
+	var wrecked: int = 0
+	var standing: int = 0
+	for host in [a, b]:
+		for child in host.get_children():
+			if child is Building:
+				if child.is_demolished():
+					wrecked += 1
+				else:
+					standing += 1
+	_log("IMPACT  buildings on the two bodies: %d demolished, %d still standing" % [wrecked, standing])
+
+
+## Craters must change the COLLIDER, not just the mesh - a player should be able
+## to walk down into one.
+func _test_crater_collider() -> void:
+	var body: OrbitalBody = null
+	for candidate in GravityManager.get_bodies():
+		if not candidate.is_shattered and candidate.radius >= 20.0:
+			body = candidate
+			break
+	if body == null:
+		_log("CRATERHIT no suitable planet")
+		return
+	var before_shape: String = body.collision.shape.get_class()
+	# Measure the collision surface height directly under a chosen point, by
+	# raycasting inward from above it.
+	var out: Vector3 = Vector3(0.2, 1.0, 0.3).normalized()
+	var probe_point: Vector3 = body.global_position + out * (body.radius + 12.0)
+	var before_hit: float = _surface_distance(body, probe_point, out)
+	body.apply_crater(body.global_position + out * body.radius, 9.0, 4.0)
+	# Collider rebuilds are coalesced on a timer; wait past it.
+	for i in range(60):
+		await get_tree().physics_frame
+	var after_shape: String = body.collision.shape.get_class()
+	var after_hit: float = _surface_distance(body, probe_point, out)
+	_log("CRATERHIT %s: collider %s -> %s, surface under impact dropped %.2fm" % [
+		body.name, before_shape, after_shape, after_hit - before_hit])
+
+## Distance from `from` inward to whatever the physics world says is solid.
+func _surface_distance(body: OrbitalBody, from: Vector3, out: Vector3) -> float:
+	var space := get_viewport().world_3d.direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(from, body.global_position)
+	query.collision_mask = 1
+	var hit: Dictionary = space.intersect_ray(query)
+	if hit.is_empty():
+		return -1.0
+	return from.distance_to(hit.position)
+
+## Buildings should be wrapped onto the sphere (pieces tilted to the local
+## normal) and lit inside.
+func _test_curved_and_lit() -> void:
+	var tilted: int = 0
+	var total: int = 0
+	var lights: int = 0
+	var worst_tilt: float = 0.0
+	for body in GravityManager.get_bodies():
+		for child in body.get_children():
+			if not (child is Building):
+				continue
+			for piece in child.get_children():
+				if piece is OmniLight3D:
+					lights += 1
+				if not (piece is MeshInstance3D):
+					continue
+				total += 1
+				# A piece off the building's centre line should be rotated so
+				# its own up follows the sphere, not left axis-aligned.
+				var tilt: float = rad_to_deg(piece.transform.basis.y.angle_to(Vector3.UP))
+				if tilt > 0.5:
+					tilted += 1
+				worst_tilt = maxf(worst_tilt, tilt)
+	_log("CURVED  %d/%d building pieces tilted to the surface (max tilt %.1f deg); %d interior lights" % [
+		tilted, total, worst_tilt, lights])
+
+func _test_audio() -> void:
+	var names: Array = Sfx._library.keys()
+	names.sort()
+	var total_ms: float = 0.0
+	for n in names:
+		total_ms += (Sfx._library[n] as AudioStreamWAV).get_length() * 1000.0
+	_log("AUDIO   %d synthesised sounds (%.0fms total), %d 3D voices: %s" % [
+		names.size(), total_ms, Sfx._voices.size(), ", ".join(names)])
+
+func _test_decor() -> void:
+	var rings: int = 0
+	var shells: int = 0
+	for body in GravityManager.get_bodies():
+		if body._orbit_ring != null and is_instance_valid(body._orbit_ring):
+			rings += 1
+		if body._atmosphere != null:
+			shells += 1
+	var field: DebrisField = _arena.get_node_or_null("DebrisField")
+	var rocks: int = field.multimesh.instance_count if field else 0
+	var faceted: bool = GravityManager.get_bodies()[0].mesh.mesh is ArrayMesh
+	_log("DECOR   %d orbit rings, %d atmosphere shells, %d debris rocks, planets faceted=%s" % [
+		rings, shells, rocks, faceted])
