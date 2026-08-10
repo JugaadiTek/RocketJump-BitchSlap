@@ -32,6 +32,32 @@ var _launch_target: OrbitalBody = null
 var _trail: GPUParticles3D = null
 var _aim_window: float = AIM_WINDOW
 
+## Re-entry from the arena edge. Same launch, trail and landing as a spawn, but
+## starting from wherever the player already is and with no aim window: they get
+## flung at a random planet immediately rather than hanging on the boundary.
+func start_boundary_return(p: Player) -> void:
+	player = p
+	_active = true
+	_launching = true
+	_aim_timer = 0.0
+	_locked_body = null
+	_aim_window = 0.0
+	var target: OrbitalBody = _random_target()
+	if target == null:
+		_active = false
+		_launching = false
+		return
+	_begin_launch(target)
+
+func _random_target() -> OrbitalBody:
+	var usable: Array[OrbitalBody] = []
+	for body in GravityManager.get_bodies():
+		if is_instance_valid(body) and not body.is_shattered and body.radius >= 5.0:
+			usable.append(body)
+	if usable.is_empty():
+		return GravityManager.get_nearest_body(player.global_position)
+	return usable[randi() % usable.size()]
+
 func start_spawn(p: Player) -> void:
 	player = p
 	_active = true

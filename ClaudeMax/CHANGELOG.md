@@ -7,6 +7,95 @@ in [`tests/`](../tests) — see **Test harness** at the bottom.
 
 ---
 
+## 2026-08-11 — Session 5: combat feel, gore, physical asteroids, adaptive audio
+
+### Bugs
+- **Stuck on the arena boundary.** The bounds code steered velocity and returned
+  early, while the movement code ALSO returned early because a boundary target
+  was set — so nothing ever called `move_and_slide()` and a player who touched
+  the edge froze there permanently. Crossing the edge now hands straight to the
+  Spawner, which flings them at a randomly chosen planet on the same trailed
+  launch a respawn uses, with no aim window. Measured: **moving 0.02 s after
+  contact**, landing on a planet surface.
+- **Tower walls split open as they rose.** The wrap onto the sphere divided the
+  arc by the *surface* radius, so every storey subtended the same angle and got
+  physically wider with height. Dividing by the radius *at that height* keeps
+  each storey the same width. Measured top/base width ratio **1.006, against
+  1.756 under the old mapping**.
+
+### Players
+- **Head sphere** on the character (collider + mesh), and **headshots do 300%**.
+  Verified: 10 → 30 damage. The test is by hit height along the player's own up
+  axis, not by which collider was struck — the body is one `CharacterBody3D` with
+  two shapes, and Godot's hit results don't report which shape was hit.
+- **Comic-book death effects**: a ragged action burst with a random word
+  ("POW!", "SPLAT!"…), a speech bubble carrying the victim's name and a skull.
+  The skull is *drawn into an ImageTexture*, not typed as an emoji — the bundled
+  font has no glyph for one and it would render as a hollow box.
+- **Gore**: blood spray, 6–10 giblets on their own ballistic arcs, and ground
+  splatter parented to the planet so it rides the surface and outlives the burst.
+- **Slug slime trails** — patches dropped every 1.8 m of crawling, parented to the
+  planet, fading out over 30 s. Measured 28 patches from a 5 s crawl.
+
+### Asteroids
+No longer one decorative MultiMesh. They are real bodies: **110 spawned (down
+from 900)**, falling under `GravityManager` (measured **6.6 m/s gained in one
+second** inside a well), colliding with planets and structures, lighting up as
+**comets when impact is under 2 s away**, and on impact cratering the surface and
+shoving the orbit. Verified end to end: comet lit on approach, impact at 1.42 s,
+mesh deformed, orbit moved.
+
+The field settles to ~66 rocks in the first few seconds as those that spawned
+inside gravity wells rain in — an opening meteor shower. Raise `orbit_clearance`
+in `DebrisField` if you'd rather they all start in true vacuum.
+
+### Audio — quality pass
+Rebuilt on composable primitives instead of three fixed generators:
+- **44.1 kHz**, up from 22.05 kHz. Everything above 11 kHz was previously gone,
+  which is why the railgun crack and metallic pings sounded dull.
+- `_osc()` with detuned unison stacks and per-sample pitch envelopes
+- `_noise()` through a state-variable filter, so a hiss can become a rumble, a
+  whoosh or a metallic ring
+- `_env()` proper ADSR per *layer*, with a curve on the release
+- `_body()` short feedback comb — this is what gives an impact physical *size*,
+  the difference between a click and a boom in a room
+- `_reverb()` Schroeder tail (allpass into three prime-length combs)
+- Output is normalised then soft-clipped, so loud sounds no longer distort and
+  quiet ones are audible
+
+**21 sounds.** Sound design is now layered per weapon: the rocket has ignition
+crack + throaty roar + tail; the explosion has crack + body-resonant boom +
+debris; the railgun has a resonant charge whine and an electrical crack with a
+metallic ring after it.
+
+### Audio — adaptive ambience
+New `Ambience` autoload with four seamless synthesised loops cross-faded by
+what's actually happening:
+- **space** (cold sparse drone) vs **surface** (warmer, wind over rock), blended
+  by altitude above the nearest planet
+- **tension** (held minor third) and **combat** (driving pulse), driven by
+  **intensity = hostile projectiles within 45 m**, full at 5. That's a far better
+  proxy for how hot a fight is than kill counts: it rises the instant you're
+  being shot at and falls the moment you break away.
+
+Fades run in level-space over 2.5 s, not dB-space — a linear dB ramp sounds like
+it jumps at the end.
+
+### Announcements
+New `Announcer` autoload with all six requested triggers wired and verified:
+headshot, killing spree (**fires on kill #3**), bitchslap, planet slayer, match
+start, and grappling another player. Each gets a big UT-style on-screen callout
+and its own synthesised stinger, with priority so a big line isn't trampled.
+
+**The spoken voice-over needs real audio files.** Everything else here is
+synthesised from oscillators and noise, which works for impacts and weapons but
+cannot produce intelligible speech. Drop `headshot.ogg`, `spree.ogg`,
+`bitchslap.ogg`, `planet_slayer.ogg`, `match_start.ogg`, `get_over_here.ogg` into
+`res://audio/vo/` and they play automatically — no further wiring. Until then the
+triggers, callouts and stingers all work on their own.
+
+---
+
 ## 2026-08-11 — Session 4: physicality and presentation
 
 ### World look
@@ -249,6 +338,7 @@ rather than pass/fail, so regressions show up as changed numbers.
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path . res://tests/MovementProbe.tscn   # bounce / slide / invisible wall
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path . res://tests/WeaponProbe.tscn     # hook, board, buster, scope, slugs, menu option
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path . res://tests/WorldProbe.tscn      # layout, buildings, ladders, spawn, craters, health, spin, impacts
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path . res://tests/CombatProbe.tscn     # boundary, tower walls, headshots, death/gore, slime, asteroids, audio, announcements
 ```
 
 Results are also written to `/tmp/rjbs_*.log`, flushed per line — a run that has

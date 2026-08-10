@@ -51,7 +51,6 @@ func _ready() -> void:
 	await _test_structural_collision()
 	await _test_crater_collider()
 	_test_curved_and_lit()
-	_test_audio()
 	_test_decor()
 	get_tree().quit()
 
@@ -342,15 +341,6 @@ func _test_curved_and_lit() -> void:
 	_log("CURVED  %d/%d building pieces tilted to the surface (max tilt %.1f deg); %d interior lights" % [
 		tilted, total, worst_tilt, lights])
 
-func _test_audio() -> void:
-	var names: Array = Sfx._library.keys()
-	names.sort()
-	var total_ms: float = 0.0
-	for n in names:
-		total_ms += (Sfx._library[n] as AudioStreamWAV).get_length() * 1000.0
-	_log("AUDIO   %d synthesised sounds (%.0fms total), %d 3D voices: %s" % [
-		names.size(), total_ms, Sfx._voices.size(), ", ".join(names)])
-
 func _test_decor() -> void:
 	var rings: int = 0
 	var shells: int = 0
@@ -359,8 +349,9 @@ func _test_decor() -> void:
 			rings += 1
 		if body._atmosphere != null:
 			shells += 1
+	# The debris field is now a spawner of real Asteroid bodies, not a MultiMesh.
 	var field: DebrisField = _arena.get_node_or_null("DebrisField")
-	var rocks: int = field.multimesh.instance_count if field else 0
+	var rocks: int = field.get_child_count() if field else 0
 	var faceted: bool = GravityManager.get_bodies()[0].mesh.mesh is ArrayMesh
 	_log("DECOR   %d orbit rings, %d atmosphere shells, %d debris rocks, planets faceted=%s" % [
 		rings, shells, rocks, faceted])

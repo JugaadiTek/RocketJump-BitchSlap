@@ -147,6 +147,7 @@ func _ready() -> void:
 		_spawn_player(1)
 		_spawn_bots()
 
+
 func _build_orbital_bodies() -> void:
 	# ORBIT_DATA lists every moon after its parent planet, so by the time we
 	# reach a "parent" entry, _bodies_by_name already has that planet's node.
@@ -378,8 +379,8 @@ func _build_health_packs() -> void:
 func _build_debris_field() -> void:
 	var field := DebrisField.new()
 	field.name = "DebrisField"
-	field.inner_radius = 60.0
-	field.outer_radius = GravityManager.ARENA_BOUNDARY_RADIUS * 0.96
+	field.inner_radius = 70.0
+	field.outer_radius = GravityManager.ARENA_BOUNDARY_RADIUS * 0.92
 	add_child(field)
 
 func _spawn_bots() -> void:

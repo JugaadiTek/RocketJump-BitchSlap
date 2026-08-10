@@ -92,7 +92,6 @@ func demolish() -> void:
 	if _demolished:
 		return
 	_demolished = true
-	Sfx.play_3d("collapse", global_position, 1.0, 6.0)
 	_spawn_rubble()
 	# Collision first, so nothing is left standing invisibly in the way.
 	for child in _body.get_children():
@@ -204,9 +203,15 @@ func _surface_transform(local_pos: Vector3) -> Transform3D:
 	if axis.length_squared() < 0.000001:
 		return Transform3D(Basis(), local_pos)
 	axis = axis.normalized()
-	var dir: Vector3 = Vector3.UP.rotated(axis, arc / r)
+	# Divide the arc by the radius AT THIS HEIGHT, not by the surface radius.
+	# Using the surface radius made the same authored offset subtend a fixed
+	# angle, so pieces fanned further apart the higher they went and the walls
+	# visibly split open. Scaling the angle with height keeps every storey the
+	# same width - the base still follows the curve, the tower stays a tower.
+	var height_radius: float = maxf(r + local_pos.y, 0.01)
+	var dir: Vector3 = Vector3.UP.rotated(axis, arc / height_radius)
 	var centre := Vector3(0.0, -r, 0.0)
-	return Transform3D(Basis(Quaternion(Vector3.UP, dir)), centre + dir * (r + local_pos.y))
+	return Transform3D(Basis(Quaternion(Vector3.UP, dir)), centre + dir * height_radius)
 
 ## Warm interior light. Buildings read as inhabited from outside and are
 ## actually navigable inside, rather than being black boxes you enter blind.

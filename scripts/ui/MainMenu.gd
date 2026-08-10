@@ -22,7 +22,6 @@ func _ready() -> void:
 ## Stashed on MatchState rather than passed along, because every entry point
 ## below leaves this scene behind - the flag has to outlive it.
 func _apply_options() -> void:
-	Sfx.play_ui("ui_click")
 	MatchState.start_with_all_weapons = all_weapons_check.button_pressed
 
 func _get_port() -> int:

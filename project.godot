@@ -21,7 +21,6 @@ NetworkManager="*uid://dcgki6kixygy8"
 MatchState="*uid://bj6t2nvqyx7t4"
 GravityManager="*uid://r33nxjp1ili4"
 InputSetup="*uid://et34ajx8e1eb"
-Sfx="*res://scripts/autoload/Sfx.gd"
 
 [display]
 

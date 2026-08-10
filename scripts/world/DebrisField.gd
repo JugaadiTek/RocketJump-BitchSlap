@@ -1,78 +1,65 @@
 class_name DebrisField
-extends MultiMeshInstance3D
-## The drifting asteroid rubble that fills the space between planets in the
-## concept art. Purely decorative - no collision, no gravity - so it costs a
-## single draw call for the whole field via MultiMesh rather than a node each.
+extends Node3D
+## Spawns the drifting rock field between the planets.
 ##
-## Rocks are scattered through the shell the planets orbit in, but pushed clear
-## of every orbital track so nothing appears to be embedded in a planet's path.
+## These used to be one decorative MultiMesh. They are now real Asteroid bodies:
+## they fall under gravity, players and structures collide with them, they streak
+## as comets on final approach, and they crater whatever they land on. That is a
+## great deal more expensive per rock, which is exactly why there are far fewer
+## of them than the cosmetic field had.
 
-@export var rock_count: int = 900
-@export var inner_radius: float = 60.0
-@export var outer_radius: float = 520.0
-@export var min_scale: float = 0.6
-@export var max_scale: float = 4.5
-## Rocks are nudged out of any band a planet sweeps through, plus this margin.
-@export var orbit_clearance: float = 14.0
-## Slow tumble of the whole field, so the backdrop is never quite static.
-@export var drift_speed: float = 0.006
+@export var rock_count: int = 110
+@export var inner_radius: float = 70.0
+@export var outer_radius: float = 500.0
+@export var min_radius: float = 0.8
+@export var max_radius: float = 3.4
+## Rocks are nudged out of any band a planet sweeps through, plus this margin,
+## so none of them start already inside a world.
+@export var orbit_clearance: float = 18.0
+## Rocks are given a slow tangential drift, so the field lazily orbits instead of
+## raining straight inward the moment the match starts.
+@export var drift_speed_min: float = 1.5
+@export var drift_speed_max: float = 6.0
 
 func _ready() -> void:
-	var rock := SphereMesh.new()
-	rock.radius = 1.0
-	rock.height = 2.0
-	# Deliberately coarse: at this distance the faceting reads as rock, and it
-	# matches the low-poly planets.
-	rock.radial_segments = 5
-	rock.rings = 3
-
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.34, 0.31, 0.33)
-	mat.roughness = 1.0
-	mat.vertex_color_use_as_albedo = true
-	material_override = mat
-
-	multimesh = MultiMesh.new()
-	multimesh.transform_format = MultiMesh.TRANSFORM_3D
-	multimesh.use_colors = true
-	multimesh.mesh = rock
-	multimesh.instance_count = rock_count
-
-	var occupied: Array[float] = _orbit_radii()
+	var occupied: Array[Vector2] = _orbit_bands()
 	for i in range(rock_count):
-		multimesh.set_instance_transform(i, _scatter(occupied))
-		# Slight per-rock tint variation, warm to cold, so the field doesn't
-		# read as one flat grey mass.
-		var shade: float = randf_range(0.55, 1.25)
-		multimesh.set_instance_color(i, Color(0.42 * shade, 0.37 * shade, 0.36 * shade))
+		var rock := Asteroid.new()
+		rock.radius = randf_range(min_radius, max_radius)
+		add_child(rock)
+		var position: Vector3 = _scatter(occupied)
+		rock.global_position = position
+		# Tangential to the arena centre, so it drifts around rather than in.
+		var outward: Vector3 = position.normalized()
+		var tangent: Vector3 = outward.cross(Vector3.UP)
+		if tangent.length_squared() < 0.001:
+			tangent = outward.cross(Vector3.RIGHT)
+		tangent = tangent.normalized()
+		rock.launch(tangent * randf_range(drift_speed_min, drift_speed_max)
+			+ outward * randf_range(-0.6, 0.6))
 
-func _process(delta: float) -> void:
-	rotate(Vector3.UP, drift_speed * delta)
-
-func _orbit_radii() -> Array[float]:
-	var radii: Array[float] = []
+## Each entry is (distance of the body's orbit from the arena centre, how much
+## room to leave around it). The room has to include the planet's own radius -
+## clearing a flat margin from the orbit line still dropped rocks inside a 44m
+## world, which then simply fell in on the first frame.
+func _orbit_bands() -> Array[Vector2]:
+	var bands: Array[Vector2] = []
 	for body in GravityManager.get_bodies():
-		if is_instance_valid(body) and body.orbit_radius > 0.01:
-			radii.append(body.global_position.length())
-	return radii
+		if is_instance_valid(body):
+			bands.append(Vector2(body.global_position.length(),
+				body.radius + body.structure_reach + orbit_clearance))
+	return bands
 
-func _scatter(occupied: Array[float]) -> Transform3D:
+func _scatter(occupied: Array[Vector2]) -> Vector3:
 	var distance: float = randf_range(inner_radius, outer_radius)
 	# Shove the rock to the nearer edge of any orbital band it landed inside.
-	for r in occupied:
-		if absf(distance - r) < orbit_clearance:
-			distance = r + (orbit_clearance if distance >= r else -orbit_clearance)
+	for band in occupied:
+		if absf(distance - band.x) < band.y:
+			distance = band.x + (band.y if distance >= band.x else -band.y)
 	var direction := Vector3(
 		randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)
 	).normalized()
 	# Flattened toward the orbital plane so the field reads as a disc of rubble
 	# rather than an even sphere of it.
 	direction.y *= randf_range(0.15, 0.55)
-	direction = direction.normalized()
-
-	var basis := Basis.from_euler(Vector3(
-		randf_range(0.0, TAU), randf_range(0.0, TAU), randf_range(0.0, TAU)))
-	var scale: float = randf_range(min_scale, max_scale)
-	# Non-uniform scale so no two rocks are the same potato.
-	basis = basis.scaled(Vector3(scale, scale * randf_range(0.6, 1.3), scale * randf_range(0.7, 1.2)))
-	return Transform3D(basis, direction * distance)
+	return direction.normalized() * distance

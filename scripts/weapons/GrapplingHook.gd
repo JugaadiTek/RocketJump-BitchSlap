@@ -70,8 +70,6 @@ func _advance_hook(delta: float, goal: Vector3) -> void:
 		if _hook_state == HookState.RETRACTING:
 			_hook_state = HookState.IDLE
 		else:
-			if _pending_bite != HookBite.NONE:
-				Sfx.play_3d("grapple_hit", _hook_pos, 1.0, -1.0)
 			_on_hook_landed()
 		return
 	_hook_pos += to_goal.normalized() * step
@@ -191,7 +189,6 @@ func _do_fire(muzzle_transform: Transform3D, aim_direction: Vector3) -> void:
 			_pull_target = collider as Node3D
 
 	_hook_state = HookState.FLYING
-	Sfx.play_3d("grapple_fire", from, 1.0, -3.0)
 	_update_cable()
 
 func on_holster() -> void:

@@ -146,6 +146,7 @@ func _process_slithering(delta: float) -> void:
 	if new_to_center.length_squared() > 0.0001:
 		global_position = _landed_body.global_position + new_to_center.normalized() * (_landed_body.radius + 0.06)
 
+
 	if new_dir.length_squared() > 0.0001:
 		look_at(global_position + new_dir, _surface_normal)
 

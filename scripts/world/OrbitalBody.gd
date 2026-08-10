@@ -414,8 +414,6 @@ func shatter(blast_radius: float, blast_damage: float) -> void:
 	if is_shattered:
 		return
 	is_shattered = true
-	# Scaled by size: a moon cracks, a 44m world detonates.
-	Sfx.play_3d("planet_shatter", global_position, clampf(30.0 / maxf(radius, 1.0), 0.45, 1.6), 10.0, 0.05)
 	shattered.emit(self)
 	static_body.set_collision_layer_value(1, false)
 	static_body.set_collision_mask_value(1, false)

@@ -83,6 +83,10 @@ extends CharacterBody3D
 
 @export_group("Health")
 @export var max_health: float = 100.0
+## Height above the player's feet, along their own up axis, at which a hit counts
+## as a headshot. Matches the head sphere in Player.tscn (centre 1.68, r 0.28).
+@export var head_shot_height: float = 1.42
+@export var head_shot_multiplier: float = 3.0
 @export var respawn_delay: float = 3.0
 
 ## ---- Runtime state -----------------------------------------------------
@@ -92,7 +96,6 @@ var is_aiming: bool = false
 var current_gravity: Vector3 = Vector3.ZERO
 var last_damage_instigator_path: NodePath
 var _impulse_grace_remaining: float = 0.0
-var _boundary_target: OrbitalBody = null  # non-null while being guided back from the boundary
 ## The planet whose reference frame we're currently riding, and that frame's
 ## world velocity at our position. While _frame_body is set, `velocity` is
 ## RELATIVE to it - use get_world_velocity() for anything that needs world space.
@@ -102,8 +105,6 @@ var _platform_velocity: Vector3 = Vector3.ZERO
 var _ladder: Node3D = null
 ## Eased "up", chasing the raw target from _get_up_direction() - see _smoothed_up.
 var _up_smoothed: Vector3 = Vector3.ZERO
-var _was_grounded: bool = true
-var _airborne_speed: float = 0.0
 
 ## Grappling cable state, written by GrapplingHook and read by HookVisual.
 ## Replicated (see _setup_replication) so everyone can see who is grappling
@@ -377,66 +378,20 @@ func _distance_to_nearest_surface() -> float:
 		return INF
 	return global_position.distance_to(body.global_position) - body.radius
 
-## Hard edge of the arena. Two phases:
-##   LAUNCH  — first frame outside the boundary: snap velocity to a fast
-##             straight shot aimed at the nearest planet's center. The
-##             impulse grace exempts this from ground-stick so it carries.
-##   GUIDE   — every subsequent frame: steer the velocity vector to track
-##             the (moving) planet as it orbits, so the player arrives even
-##             if the planet moved significantly during the transit.
-##   LAND    — once within landing_range of the surface, smoothly decelerate
-##             to a safe touchdown speed and clear _boundary_target so normal
-##             movement resumes.
+## Hard edge of the arena. Crossing it hands the player straight to the Spawner,
+## which flings them at a randomly chosen planet on the same trailed launch a
+## respawn uses - no aim window, no choice.
+##
+## The previous version steered velocity itself and returned early, while
+## _apply_movement ALSO returned early because a boundary target was set. Between
+## them nothing ever called move_and_slide(), so a player who touched the edge
+## simply stopped dead there and stayed stuck.
 func _apply_arena_bounds() -> void:
-	const LANDING_RANGE: float = 18.0   # metres from surface, start decelerating
-	const LANDING_SPEED: float = 10.0   # speed to decelerate toward during landing
-
-	if global_position.length() > GravityManager.ARENA_BOUNDARY_RADIUS:
-		if _boundary_target == null:
-			# First frame outside - choose target and launch
-			_boundary_target = GravityManager.get_nearest_body(global_position)
-		if _boundary_target == null or _boundary_target.is_shattered:
-			_boundary_target = null
-			return
-		var to_target: Vector3 = _boundary_target.global_position - global_position
-		if to_target.length_squared() < 0.0001:
-			return
-		velocity = to_target.normalized() * boundary_launch_speed
-		_impulse_grace_remaining = max(_impulse_grace_remaining, impulse_grace_duration)
+	if global_position.length() <= GravityManager.ARENA_BOUNDARY_RADIUS:
 		return
-
-	# Inside boundary - if we have an active target we're mid-flight; keep guiding
-	if _boundary_target == null:
+	if _spawner == null or _is_spawning():
 		return
-	if _boundary_target.is_shattered:
-		_boundary_target = null
-		return
-
-	var to_target: Vector3 = _boundary_target.global_position - global_position
-	var dist_to_surface: float = to_target.length() - _boundary_target.radius
-
-	if dist_to_surface <= LANDING_RANGE:
-		# Managed landing: progressively decelerate toward landing speed to
-		# avoid slamming full-speed into the surface. Once nearly touching
-		# the surface influence zone, clear the override and let normal
-		# physics take over.
-		var t: float = clamp(dist_to_surface / LANDING_RANGE, 0.0, 1.0)
-		var desired_speed: float = lerp(LANDING_SPEED, boundary_launch_speed * 0.6, t)
-		var dir: Vector3 = to_target.normalized()
-		velocity = velocity.lerp(dir * desired_speed, clamp(boundary_landing_slowdown * get_physics_process_delta_time(), 0.0, 1.0))
-		move_and_slide()
-		if dist_to_surface <= ground_stick_range * 1.5:
-			_boundary_target = null
-	else:
-		# Mid-flight: keep steering toward the (orbiting) target. Using
-		# slerp on the direction instead of a hard set means gradual
-		# course corrections are smooth rather than abrupt snaps.
-		var current_speed: float = max(velocity.length(), boundary_launch_speed)
-		var desired_dir: Vector3 = to_target.normalized()
-		var current_dir: Vector3 = velocity.normalized() if velocity.length() > 0.1 else desired_dir
-		var steered_dir: Vector3 = current_dir.slerp(desired_dir, 0.18)
-		velocity = steered_dir.normalized() * current_speed
-		move_and_slide()
+	_spawner.start_boundary_return(self)
 
 ## Right-click ADS: smoothly zooms the camera FOV and (via _apply_look)
 ## drops mouse sensitivity to match, like a standard FPS aim-down-sights.
@@ -492,11 +447,6 @@ func _apply_look(_delta: float) -> void:
 	head.rotation.x = clamp(head.rotation.x - look.y * sensitivity, -pitch_limit, pitch_limit)
 
 func _apply_movement(up: Vector3, delta: float) -> void:
-	# While being guided home from the boundary, normal player input doesn't
-	# steer - _apply_arena_bounds() owns the velocity entirely until landing.
-	if _boundary_target != null:
-		return
-
 	var forward: Vector3 = -global_transform.basis.z
 	var right: Vector3 = global_transform.basis.x
 
@@ -518,22 +468,12 @@ func _apply_movement(up: Vector3, delta: float) -> void:
 	var vel_up: float = velocity.dot(up)
 	var vel_horizontal: Vector3 = velocity - up * vel_up
 
-	# Landing thump, scaled by impact speed. Tracked here rather than from
-	# is_on_floor() alone so a hard rocket-jump landing sounds different from
-	# stepping off a kerb.
-	var grounded: bool = is_on_floor()
-	if grounded and not _was_grounded and _airborne_speed > 6.0:
-		Sfx.play_3d("land", global_position, 1.0, clampf(-18.0 + _airborne_speed * 0.5, -18.0, 2.0))
-	_was_grounded = grounded
-	_airborne_speed = 0.0 if grounded else maxf(_airborne_speed, absf(vel_up))
-
 	if is_on_floor():
 		vel_horizontal = _apply_friction(vel_horizontal, ground_friction, delta)
 		vel_horizontal = _q3_accelerate(wish_dir, max_ground_speed, ground_accel, vel_horizontal, delta)
 		if _wants_jump():
 			var g_mag: float = max(current_gravity.length(), 4.0)
 			vel_up = sqrt(2.0 * g_mag * jump_height)
-			Sfx.play_3d("jump", global_position, 1.0, -12.0)
 		else:
 			# Discard any leftover outward speed while grounded. Running over a
 			# curved, moving surface keeps generating small positive vel_up from
@@ -552,9 +492,6 @@ func _apply_movement(up: Vector3, delta: float) -> void:
 ## nearly cancelled so a held direction actually holds. Drag rather than a hard
 ## speed clamp does most of the limiting, which keeps steering responsive.
 func _apply_flight_movement(up: Vector3, delta: float) -> void:
-	if _boundary_target != null:
-		return
-
 	var cam_basis: Basis = camera.global_transform.basis if camera else global_transform.basis
 	var move_axis: Vector2 = _get_move_axis()
 	if move_axis.length() > 1.0:
@@ -583,7 +520,7 @@ func clear_ladder(ladder: Node3D) -> void:
 		_ladder = null
 
 func _is_on_ladder() -> bool:
-	if is_dead or _is_spawning() or _boundary_target != null:
+	if is_dead or _is_spawning():
 		return false
 	return _ladder != null and is_instance_valid(_ladder)
 
@@ -718,14 +655,26 @@ func network_apply_impulse(force: Vector3) -> void:
 		return
 	apply_impulse(force)
 
-func apply_damage(amount: float, instigator: Node, _hit_pos: Vector3, weapon_name: String = "") -> void:
+func apply_damage(amount: float, instigator: Node, hit_pos: Vector3, weapon_name: String = "") -> void:
 	if is_dead or amount <= 0.0:
 		return
+	var headshot: bool = is_headshot(hit_pos)
+	if headshot:
+		amount *= head_shot_multiplier
 	health -= amount
 	if instigator:
 		last_damage_instigator_path = instigator.get_path()
 	if health <= 0.0:
 		_die(instigator, weapon_name)
+
+## A hit counts as a headshot by its height along this player's own up axis,
+## rather than by which collider was struck: the body is one CharacterBody3D
+## with two shapes, and Godot's move/raycast results don't say which shape of a
+## multi-shape body was hit.
+func is_headshot(hit_pos: Vector3) -> bool:
+	if hit_pos == Vector3.ZERO:
+		return false
+	return (hit_pos - global_position).dot(up_direction) >= head_shot_height
 
 @rpc("any_peer", "call_local", "reliable")
 func network_apply_damage(amount: float, instigator_path: NodePath, hit_pos: Vector3, weapon_name: String) -> void:
@@ -745,8 +694,25 @@ func _die(instigator: Node, weapon_name: String) -> void:
 	if instigator and "player_id" in instigator:
 		killer_id = instigator.player_id
 	MatchState.report_frag(player_id, killer_id, weapon_name)
+	_spawn_death_effect()
 	await get_tree().create_timer(respawn_delay).timeout
 	_respawn()
+
+const DEATH_EFFECT := preload("res://scripts/world/DeathEffect.gd")
+
+## Comic-book kill marker plus gore, dropped at the spot we fell.
+func _spawn_death_effect() -> void:
+	var effect := DEATH_EFFECT.new()
+	var root: Node = get_tree().current_scene
+	if root == null:
+		return
+	root.add_child(effect)
+	effect.global_position = global_position
+	var body: OrbitalBody = GravityManager.get_nearest_body(global_position)
+	var normal: Vector3 = up_direction
+	if body:
+		normal = (global_position - body.global_position).normalized()
+	effect.setup(display_name, up_direction, normal)
 
 func _respawn() -> void:
 	health = max_health

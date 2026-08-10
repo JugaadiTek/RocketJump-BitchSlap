@@ -16,6 +16,7 @@ extends CanvasLayer
 @onready var lock_indicator: Control = $Root/LockIndicator
 @onready var scope_overlay: ColorRect = $Root/ScopeOverlay
 
+
 var _my_player_id: int = -1
 var _frame_count: int = 0
 var _fps_timer: float = 0.0

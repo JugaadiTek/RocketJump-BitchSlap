@@ -1,4 +1,4 @@
-[gd_scene load_steps=19 format=3]
+[gd_scene load_steps=22 format=3]
 
 [ext_resource type="Script" path="res://scripts/player/Player.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/player/WeaponManager.gd" id="2"]
@@ -49,6 +49,19 @@ size = Vector3(0.16, 0.16, 0.3)
 [sub_resource type="BoxMesh" id="BoxMesh_thirdperson_gun"]
 size = Vector3(0.14, 0.16, 0.75)
 
+[sub_resource type="SphereShape3D" id="SphereShape3D_head"]
+radius = 0.28
+
+[sub_resource type="SphereMesh" id="SphereMesh_head"]
+radius = 0.28
+height = 0.56
+radial_segments = 12
+rings = 6
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_head"]
+albedo_color = Color(0.82, 0.78, 0.72, 1)
+roughness = 0.6
+
 [node name="Player" type="CharacterBody3D"]
 collision_layer = 2
 collision_mask = 3
@@ -61,11 +74,20 @@ script = ExtResource("1")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
 shape = SubResource("CapsuleShape3D_1")
 
+[node name="HeadCollision" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.68, 0)
+shape = SubResource("SphereShape3D_head")
+
 [node name="Model" type="Node3D" parent="."]
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Model"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
 mesh = SubResource("CapsuleMesh_1")
+
+[node name="HeadMesh" type="MeshInstance3D" parent="Model"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.68, 0)
+mesh = SubResource("SphereMesh_head")
+surface_material_override/0 = SubResource("StandardMaterial3D_head")
 
 [node name="WeaponModel" type="MeshInstance3D" parent="Model"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.42, 1.15, -0.3)

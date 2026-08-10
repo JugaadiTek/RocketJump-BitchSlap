@@ -17,4 +17,3 @@ func _do_fire(muzzle_transform: Transform3D, aim_direction: Vector3) -> void:
 	_get_projectile_root().add_child(slug)
 	slug.global_position = muzzle_transform.origin
 	slug.launch(aim_direction * slug_speed, owner_player)
-	Sfx.play_3d("slug_fire", muzzle_transform.origin, 1.0, -2.0, 0.18)
