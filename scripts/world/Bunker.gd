@@ -32,3 +32,12 @@ func _build() -> void:
 	# A waist-high block inside, so the interior itself has something to break
 	# line of sight against rather than being one empty room.
 	_add_box(Vector3(0.0, 0.6, 0.0), Vector3(bunker_width * 0.35, 1.2, bunker_depth * 0.3), _tint * 1.08)
+
+	# Plinth sinking the flat base into the curved surface.
+	_add_foundation(bunker_width * 0.5, bunker_depth * 0.5)
+
+func footprint_radius() -> float:
+	return sqrt(bunker_width * bunker_width + bunker_depth * bunker_depth) * 0.5
+
+func structure_height() -> float:
+	return bunker_height + floor_thickness

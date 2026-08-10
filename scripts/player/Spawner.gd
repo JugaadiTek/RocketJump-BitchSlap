@@ -11,11 +11,17 @@ extends Node
 
 signal spawn_complete
 
-const SPAWN_RADIUS: float = 615.0   ## just inside ARENA_BOUNDARY_RADIUS
-const AIM_WINDOW: float = 10.0      ## seconds to pick a planet
+const SPAWN_RADIUS: float = 505.0   ## just inside ARENA_BOUNDARY_RADIUS, clear of Halcyon (476)
+## Default seconds to pick a planet; the actual window comes from the spawning
+## entity (Player.get_spawn_aim_window()), which bots shorten drastically.
+const AIM_WINDOW: float = 10.0
 const LOCK_CONE_COS: float = 0.93   ## cos(~21°) threshold for "in sights"
 const LAUNCH_SPEED: float = 130.0
 const MIN_LOCK_DISTANCE_FROM_PLAYER: float = 60.0
+## How far behind the player the trail is emitted. The smoke is deliberately
+## thick, so emitting it at the player's own origin filled the camera and made
+## the 130 m/s flight in unflyable - it has to start well behind the head.
+const TRAIL_TRAIL_DISTANCE: float = 14.0
 
 var player: Player = null
 var _aim_timer: float = 0.0
@@ -24,6 +30,7 @@ var _locked_body: OrbitalBody = null
 var _launching: bool = false
 var _launch_target: OrbitalBody = null
 var _trail: GPUParticles3D = null
+var _aim_window: float = AIM_WINDOW
 
 func start_spawn(p: Player) -> void:
 	player = p
@@ -31,6 +38,7 @@ func start_spawn(p: Player) -> void:
 	_aim_timer = 0.0
 	_locked_body = null
 	_launching = false
+	_aim_window = p.get_spawn_aim_window()
 	_place_at_boundary()
 
 func _place_at_boundary() -> void:
@@ -60,15 +68,15 @@ func _physics_process(delta: float) -> void:
 	if candidate and player._wants_fire():
 		_locked_body = candidate
 
-	var timed_out: bool = (_aim_timer >= AIM_WINDOW)
-	var chosen: OrbitalBody = _locked_body if _locked_body else (GravityManager.get_nearest_body(player.global_position) if timed_out else null)
+	var timed_out: bool = (_aim_timer >= _aim_window)
+	var chosen: OrbitalBody = _locked_body if _locked_body else (player.pick_spawn_target() if timed_out else null)
 
 	if chosen:
 		_begin_launch(chosen)
 
 	# Push HUD crosshair state
 	if player.hud and player.hud.has_method("update_spawn_aim"):
-		player.hud.update_spawn_aim(candidate, _aim_timer, AIM_WINDOW)
+		player.hud.update_spawn_aim(candidate, _aim_timer, _aim_window)
 
 func _get_aimed_planet() -> OrbitalBody:
 	if player.camera == null:
@@ -119,29 +127,87 @@ func _finish_spawn() -> void:
 		_trail.emitting = false
 	if _launch_target and is_instance_valid(_launch_target):
 		_launch_target.perturb_orbit(randf_range(1.0, 3.0))
+		# Punch a crater where we touched down, sized against the planet so a
+		# pebble gets a dimple and a big world gets a proper bowl.
+		var crater_radius: float = clampf(_launch_target.radius * 0.22, 1.5, 9.0)
+		_launch_target.apply_crater(player.global_position, crater_radius, crater_radius * 0.32)
 	_spawn_landing_fx()
 	player._impulse_grace_remaining = 0.1
 	spawn_complete.emit()
 
+## Keeps the emitter trailing behind the player along the flight path, in the
+## player's own local space (the node is parented to them).
+func _position_trail(travel_dir: Vector3) -> void:
+	if _trail == null or not is_instance_valid(_trail):
+		return
+	_trail.position = player.to_local(player.global_position - travel_dir * TRAIL_TRAIL_DISTANCE)
+
 func _spawn_trail() -> void:
 	_trail = GPUParticles3D.new()
 	player.add_child(_trail)
+	_trail.position = Vector3(0, 0, TRAIL_TRAIL_DISTANCE)
 	var mat := ParticleProcessMaterial.new()
 	mat.direction = Vector3(0, 1, 0)
-	mat.spread = 25.0
-	mat.initial_velocity_min = 1.0
-	mat.initial_velocity_max = 4.0
+	mat.spread = 180.0
+	mat.initial_velocity_min = 2.0
+	mat.initial_velocity_max = 11.0
 	mat.gravity = Vector3.ZERO
-	mat.scale_min = 0.15
-	mat.scale_max = 0.4
-	mat.color = Color(0.5, 0.8, 1.0, 0.85)
+	# Emitted from a sphere rather than a point so the column has real girth
+	# instead of being a thin thread of billboards.
+	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	mat.emission_sphere_radius = 3.2
+	# Big, long-lived puffs that keep growing: at 130 m/s the trail has to be
+	# thick and slow-fading to read as a smoke column rather than a dotted line.
+	mat.scale_min = 2.2
+	mat.scale_max = 5.5
+	mat.scale_curve = _growth_curve()
+	# Each particle picks a colour along this ramp and then ages along it too:
+	# hot red at the nose, orange through the middle, cooling to grey smoke.
+	mat.color_ramp = _smoke_ramp()
 	_trail.process_material = mat
-	_trail.draw_pass_1 = SphereMesh.new()
-	_trail.amount = 20
-	_trail.lifetime = 0.8
-	_trail.fixed_fps = 30
+	var puff := SphereMesh.new()
+	puff.radial_segments = 8
+	puff.rings = 4
+	var puff_mat := StandardMaterial3D.new()
+	puff_mat.vertex_color_use_as_albedo = true
+	puff_mat.albedo_color = Color(1.0, 1.0, 1.0, 0.85)
+	puff_mat.emission_enabled = true
+	puff_mat.emission = Color(1.0, 0.35, 0.1, 1.0)
+	puff_mat.emission_energy_multiplier = 1.6
+	puff_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	puff_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	puff_mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	puff.material = puff_mat
+	_trail.draw_pass_1 = puff
+	_trail.amount = 420
+	_trail.lifetime = 3.2
+	_trail.fixed_fps = 0
 	_trail.emitting = true
 	_trail.local_coords = false
+
+## Red -> orange -> grey -> transparent, the life of one puff of exhaust smoke.
+func _smoke_ramp() -> GradientTexture1D:
+	var gradient := Gradient.new()
+	gradient.set_offset(0, 0.0)
+	gradient.set_color(0, Color(1.0, 0.18, 0.05, 1.0))
+	gradient.add_point(0.25, Color(1.0, 0.48, 0.10, 0.95))
+	gradient.add_point(0.55, Color(0.85, 0.42, 0.22, 0.8))
+	gradient.add_point(0.8, Color(0.42, 0.40, 0.40, 0.55))
+	gradient.set_offset(1, 1.0)
+	gradient.set_color(1, Color(0.25, 0.24, 0.24, 0.0))
+	var tex := GradientTexture1D.new()
+	tex.gradient = gradient
+	return tex
+
+## Puffs swell as they age, the way real exhaust billows out behind a vehicle.
+func _growth_curve() -> CurveTexture:
+	var curve := Curve.new()
+	curve.add_point(Vector2(0.0, 0.35))
+	curve.add_point(Vector2(0.4, 0.9))
+	curve.add_point(Vector2(1.0, 1.0))
+	var tex := CurveTexture.new()
+	tex.curve = curve
+	return tex
 
 func _spawn_landing_fx() -> void:
 	var particles := GPUParticles3D.new()

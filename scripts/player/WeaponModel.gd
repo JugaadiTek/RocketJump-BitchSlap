@@ -25,6 +25,13 @@ var _applied_name: String = ""
 
 func _ready() -> void:
 	_player = owner as Player
+	# This is the gun OTHER people see. In your own view the first-person
+	# viewmodel is the gun, so showing this one too would put a second weapon
+	# floating beside your head.
+	if _player and _player.is_first_person_view():
+		visible = false
+		set_process(false)
+		return
 	mesh = mesh.duplicate()
 	_material = StandardMaterial3D.new()
 	_material.metallic = 0.4

@@ -14,6 +14,7 @@ extends CanvasLayer
 @onready var spawn_aim_panel: Control = $Root/SpawnAimPanel
 @onready var spawn_timer_label: Label = $Root/SpawnAimPanel/TimerLabel
 @onready var lock_indicator: Control = $Root/LockIndicator
+@onready var scope_overlay: ColorRect = $Root/ScopeOverlay
 
 var _my_player_id: int = -1
 var _frame_count: int = 0
@@ -30,6 +31,12 @@ func _process(delta: float) -> void:
 		fps_label.text = "FPS: %d" % _frame_count
 		_frame_count = 0
 		_fps_timer = 0.0
+
+## Full-screen railgun optic: transparent inside the lens, blurred and darkened
+## outside it (see scenes/ui/scope.gdshader).
+func update_scope(active: bool) -> void:
+	if scope_overlay:
+		scope_overlay.visible = active
 
 func update_charge_bar(charge: float, visible_flag: bool) -> void:
 	charge_panel.visible = visible_flag

@@ -3,6 +3,13 @@ extends Player
 
 enum AiState { WANDER, ENGAGE }
 
+## Loadout slots, matching the order WeaponManager._ready() adds them.
+const WEAPON_ROCKET := 0
+const WEAPON_RAILGUN := 1
+const WEAPON_SLUG := 2
+const WEAPON_GRAPPLE := 3
+const WEAPON_BOARD := 4
+
 const BOT_NAMES: Array[String] = [
 	"Xargon", "Blastrix", "Voidwing", "Krak", "Zephyra", "Pulsar", "Nibor",
 	"Strikex", "Nullform", "Cygnia", "Mortex", "Vox", "Skullfire", "Zaptor",
@@ -34,9 +41,31 @@ var _ai_wants_fire: bool = false
 var _ai_wants_jump: bool = false
 var _ai_wants_melee: bool = false
 var _ai_weapon_index: int = -1
+## Fire is pulsed rather than held: the railgun only shoots on RELEASE (it
+## charges while held), so a bot that held the trigger forever would charge to
+## full and never actually fire. Other weapons just get a natural burst rhythm
+## out of the same mechanism.
+var _fire_holding: bool = false
+var _fire_phase: float = 0.0
 
 func _uses_mouse_look() -> bool:
 	return false
+
+## Bots take the same boundary-launch spawn as humans, but choose fast: 31 of
+## them sitting out the full 10s human aim window would leave the arena empty.
+func get_spawn_aim_window() -> float:
+	return randf_range(0.5, 2.5)
+
+## Spread across the whole arena instead of all defaulting to the nearest rock.
+func pick_spawn_target() -> OrbitalBody:
+	var bodies: Array[OrbitalBody] = GravityManager.get_bodies()
+	var usable: Array[OrbitalBody] = []
+	for body in bodies:
+		if is_instance_valid(body) and not body.is_shattered and body.radius >= 5.0:
+			usable.append(body)
+	if usable.is_empty():
+		return super.pick_spawn_target()
+	return usable[randi() % usable.size()]
 
 func _is_local_view() -> bool:
 	return false
@@ -70,6 +99,8 @@ func _think(delta: float) -> void:
 	else:
 		_do_wander(delta)
 
+	_update_fire_pulse(delta)
+
 func _do_engage(_delta: float) -> void:
 	var eye: Vector3 = camera.global_position
 	var dist: float = eye.distance_to(_target.global_position)
@@ -99,17 +130,52 @@ func _do_engage(_delta: float) -> void:
 
 	if dist < 3.0:
 		_ai_wants_melee = true
-	elif dist < preferred_combat_range_max:
-		_ai_weapon_index = 0 # rocket
 	else:
-		_ai_weapon_index = 1 # railgun
+		_ai_weapon_index = _choose_weapon(dist)
 
 	var facing_error_deg: float = rad_to_deg(get_look_direction().angle_to(_ai_desired_dir))
-	if facing_error_deg <= aim_error_max_deg * 0.5 + 4.0:
-		_ai_wants_fire = true
+	var aimed: bool = facing_error_deg <= aim_error_max_deg * 0.5 + 4.0
+	# The board and the hook are traversal tools, not shots - they get used to
+	# reach the fight rather than only when perfectly on target.
+	if _ai_weapon_index == WEAPON_BOARD or _ai_weapon_index == WEAPON_GRAPPLE:
+		aimed = facing_error_deg <= 35.0
+	_ai_wants_fire = aimed and _fire_holding
 
 	if randf() < 0.004:
 		_ai_wants_jump = true
+
+## Picks the right tool for the range, and reaches for the traversal gear when
+## there is real distance to close rather than only ever trading shots.
+func _choose_weapon(dist: float) -> int:
+	# Adrift in open space with the target far off: ride the board over.
+	if dist > 60.0 and _distance_to_nearest_surface() > 10.0:
+		return WEAPON_BOARD
+	# Far, but with ground nearby to bite into: swing across on the hook.
+	if dist > 85.0:
+		return WEAPON_GRAPPLE
+	if dist > 50.0:
+		return WEAPON_RAILGUN
+	if dist > preferred_combat_range_min:
+		return WEAPON_SLUG if randf() < 0.3 else WEAPON_ROCKET
+	return WEAPON_ROCKET
+
+## Alternates the trigger so charge-on-release weapons actually discharge.
+func _update_fire_pulse(delta: float) -> void:
+	_fire_phase -= delta
+	if _fire_phase > 0.0:
+		return
+	_fire_holding = not _fire_holding
+	match _ai_weapon_index:
+		WEAPON_RAILGUN:
+			# Long enough to build most of a charge, then a clean release.
+			_fire_phase = randf_range(0.9, 1.6) if _fire_holding else 0.3
+		WEAPON_BOARD:
+			_fire_phase = randf_range(1.2, 2.2) if _fire_holding else 0.2
+		WEAPON_GRAPPLE:
+			# The hook detaches on release, so hold long enough for a real pull.
+			_fire_phase = randf_range(1.0, 2.0) if _fire_holding else 0.7
+		_:
+			_fire_phase = randf_range(0.3, 0.7) if _fire_holding else randf_range(0.2, 0.5)
 
 ## Predict where a slow projectile will intercept the target.
 func _predict_target_pos(dist_to_target: float) -> Vector3:
@@ -117,8 +183,10 @@ func _predict_target_pos(dist_to_target: float) -> Vector3:
 		return Vector3.ZERO
 	## Only lead for slow weapons (rocket ~26, slug ~10); railgun is instant
 	var weapon_speed: float = 26.0
-	if _ai_weapon_index == 1:
+	if _ai_weapon_index == WEAPON_RAILGUN:
 		return _target.global_position  ## hitscan, no lead needed
+	if _ai_weapon_index == WEAPON_SLUG:
+		weapon_speed = 10.0
 	var time_to_hit: float = dist_to_target / max(weapon_speed, 1.0)
 	return _target.global_position + _target.get_world_velocity() * time_to_hit
 

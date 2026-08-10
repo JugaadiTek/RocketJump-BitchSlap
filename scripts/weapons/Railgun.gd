@@ -25,11 +25,33 @@ extends Weapon
 @export var scope_fov: float = 18.0
 @export var scope_sensitivity_multiplier: float = 0.18
 @export var scope_transition_speed: float = 14.0
+## How far in front of the eye the lens sits once scoped. The viewmodel slides
+## so the scope tube lands on the camera axis, which is what makes it read as
+## looking THROUGH the optic rather than past it.
+@export var scope_eye_relief: float = 0.42
 
 var charge: float = 0.0        ## 0.0 → 1.0
 var _charging: bool = false
 var _scope_active: bool = false
 var _prev_fire_held: bool = false
+var _view_model: Node3D = null
+## Where the viewmodel has to sit for the scope to line up with the camera axis.
+var _scope_ads_offset: Vector3 = Vector3.ZERO
+var _base_sensitivity: float = 0.0025
+
+func _ready() -> void:
+	super._ready()
+	_view_model = get_node_or_null("ViewModel")
+	var scope: Node3D = get_node_or_null("ViewModel/Scope")
+	var holder := get_parent() as Node3D   # WeaponManager, offset to one side of the camera
+	if _view_model and scope and holder:
+		# Scope position in camera space with the viewmodel at rest. Negating
+		# X/Y is exactly the shift that puts the lens on the camera's own axis.
+		var rest: Vector3 = holder.position + position + _view_model.position + scope.position
+		_scope_ads_offset = Vector3(-rest.x, -rest.y, scope_eye_relief)
+	var p: Player = owner_player as Player
+	if p:
+		_base_sensitivity = p.mouse_sensitivity
 
 func _init() -> void:
 	weapon_name = "Railgun"
@@ -105,27 +127,44 @@ func _do_fire_with_damage(muzzle_transform: Transform3D, aim_direction: Vector3,
 					collider.apply_damage(shot_damage, owner_player, end_point, weapon_name)
 	_spawn_beam(from, end_point, valid)
 
-## Scope is a second distinct zoom level separate from ADS, only active
-## while the railgun is selected. The railgun right-click check looks at the
-## actual mouse button state directly to avoid coupling to the ADS system.
+## Aiming down the sights on the railgun means going through the optic: the
+## viewmodel slides until the scope tube is centred on the camera axis, the FOV
+## drops to scope_fov, sensitivity scales to match, and the HUD's scope overlay
+## blurs and darkens everything outside the lens.
+##
+## Reads p.is_aiming rather than polling the mouse directly, so bots (which set
+## it through _wants_aim()) scope the same way a human does.
 func _handle_scope(_fire_held: bool) -> void:
-	if owner_player == null:
-		return
 	var p: Player = owner_player as Player
 	if p == null or p.camera == null:
 		return
-	# Right mouse button - held to scope (same button as ADS but overridden
-	# while railgun is selected so the scope FOV takes priority).
-	_scope_active = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and visible
-	var target_fov: float
-	if _scope_active:
-		target_fov = scope_fov
-		p.mouse_sensitivity = 0.0025 * scope_sensitivity_multiplier
-	else:
-		target_fov = p.hipfire_fov_degrees
-		p.mouse_sensitivity = 0.0025
+	_scope_active = p.is_aiming and visible
+
 	var t: float = clamp(scope_transition_speed * get_process_delta_time(), 0.0, 1.0)
+	var target_fov: float = scope_fov if _scope_active else p.hipfire_fov_degrees
 	p.camera.fov = lerp(p.camera.fov, target_fov, t)
+	p.mouse_sensitivity = _base_sensitivity * (scope_sensitivity_multiplier if _scope_active else 1.0)
+	if _view_model:
+		_view_model.position = _view_model.position.lerp(
+			_scope_ads_offset if _scope_active else Vector3.ZERO, t)
+
+func is_scoped() -> bool:
+	return _scope_active
+
+## Tells Player._apply_aim() to keep its hands off the FOV while the railgun is
+## out - otherwise the generic ADS zoom and this scope zoom fight each frame.
+func overrides_aim_fov() -> bool:
+	return true
+
+## Put the viewmodel and the player's sensitivity back when switching away
+## mid-scope, or the next weapon inherits a zoomed-in mouse.
+func on_holster() -> void:
+	_scope_active = false
+	if _view_model:
+		_view_model.position = Vector3.ZERO
+	var p: Player = owner_player as Player
+	if p:
+		p.mouse_sensitivity = _base_sensitivity
 
 ## Public getter so HUD/WeaponManager can show charge state.
 func get_charge() -> float:

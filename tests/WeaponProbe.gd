@@ -46,6 +46,10 @@ func _ready() -> void:
 	await _test_board()
 	await _test_buster_lock_gate()
 	await _test_buster_shell()
+	await _test_third_person_weapon()
+	await _test_scope()
+	_test_slug_gravity()
+	await _test_all_weapons_option()
 	get_tree().quit()
 
 func _place_on_surface(altitude: float = 1.2) -> void:
@@ -86,9 +90,11 @@ func _test_hook() -> void:
 	if hook == null:
 		_log("HOOK    FAIL - active weapon is not the grappling hook")
 		return
-	var cable: MeshInstance3D = hook.get_node("Cable")
-	var head: MeshInstance3D = hook.get_node("HookHead")
-	_log("HOOK    idle: cable_visible=%s attached=%s" % [cable.visible, hook.is_attached()])
+	var visual: Node3D = _player.get_node("HookVisual")
+	var cable: MeshInstance3D = visual.get_node("Cable")
+	var head: MeshInstance3D = visual.get_node("HookHead")
+	_log("HOOK    idle: cable_visible=%s attached=%s (cable lives on the Player, outside the hidden viewmodel: %s)" % [
+		cable.visible, hook.is_attached(), visual.get_path()])
 
 	# Straight down at the planet, ~90m below.
 	var out: Vector3 = (_player.global_position - _body.global_position).normalized()
@@ -110,9 +116,6 @@ func _test_hook() -> void:
 		max_extension = maxf(max_extension, extension)
 		if i < 6:
 			extension_samples.append("%.1f" % extension)
-			_log("  [hook %d] state=%d can_fire=%s cooldown=%.2f fire_held=%s spawning=%s" % [
-				i, hook._hook_state, hook.can_fire(), hook._cooldown_remaining,
-				_player.probe_fire, _player._is_spawning()])
 	var pulled_distance: float = _player.global_position.distance_to(target)
 	_log("HOOK    firing: cable_visible %d/120 frames, attached %d/120, cable paid out to %.1fm" % [
 		frames_cable_visible, frames_attached, max_extension])
@@ -194,18 +197,6 @@ func _test_buster_lock_gate() -> void:
 		if is_instance_valid(buster) and locked_at_frame < 0:
 			if buster.get_lock_target() != null:
 				locked_at_frame = i
-			elif i % 40 == 0:
-				var eye: Vector3 = _player.camera.global_position
-				var to_body: Vector3 = (target_body.global_position - eye).normalized()
-				var dot_before: float = _player.get_look_direction().dot(to_body)
-				_player.aim_at(target_body.global_position)
-				var dot_after: float = _player.get_look_direction().dot(to_body)
-				var radial: Vector3 = (_player.global_position - _body.global_position).normalized()
-				_log("  [buster %d] aim_dot before=%.3f after_aim=%.3f | pitch=%.2f up_err=%.3f alt=%.1f on_floor=%s" % [
-					i, dot_before, dot_after, _player.head.rotation.x,
-					1.0 - _player.global_transform.basis.y.dot(radial),
-					_player.global_position.distance_to(_body.global_position) - _body.radius,
-					_player.is_on_floor()])
 		if _count_shells() > 0:
 			fired_at_frame = i
 			break
@@ -266,3 +257,111 @@ func _test_buster_shell() -> void:
 			target_body.name, float(hit_frame) / 60.0, target_body.is_shattered])
 	else:
 		_log("BUSTER  shell still in flight after 15s (did not reach target)")
+
+
+## IMPROVEMENT - everyone can see what gun everyone else is holding.
+func _test_third_person_weapon() -> void:
+	await _place_on_surface()
+	var model: MeshInstance3D = _player.get_node("Model/WeaponModel")
+	var seen: Array[String] = []
+	for index in [0, 1, 2, 3, 4]:
+		await _select(index)
+		await get_tree().process_frame
+		await get_tree().process_frame
+		var weapon: Weapon = _player.get_displayed_weapon()
+		seen.append("%s%s" % [weapon.weapon_name, "" if model.visible else "(HIDDEN)"])
+	# The body model is never hidden for remote views, unlike the viewmodel.
+	var viewmodel_hidden_for_others: bool = not _player.weapon_manager.visible
+	_log("THIRDPERSON model visible per weapon = [%s]; first-person viewmodel hidden for non-local view = %s" % [
+		", ".join(seen), viewmodel_hidden_for_others])
+
+## IMPROVEMENT - railgun ADS looks through the scope.
+func _test_scope() -> void:
+	await _place_on_surface()
+	await _select(1)
+	var railgun = _player.weapon_manager.get_active_weapon()
+	var view_model: Node3D = railgun.get_node("ViewModel")
+	var rest_offset: Vector3 = view_model.position
+	var hip_fov: float = _player.camera.fov
+	_player.probe_aim = true
+	for i in range(120):
+		await get_tree().physics_frame
+		await get_tree().process_frame
+	var scoped_fov: float = _player.camera.fov
+	var scoped_offset: Vector3 = view_model.position
+	# Where the scope tube ends up relative to the camera axis: near zero on
+	# X/Y means you are looking straight down the optic.
+	var scope_node: Node3D = railgun.get_node("ViewModel/Scope")
+	var in_camera: Vector3 = _player.camera.global_transform.affine_inverse() * scope_node.global_position
+	_log("SCOPE   scoped=%s fov %.0f -> %.0f | viewmodel %.2f -> %.2f | lens offset from camera axis = (%.3f, %.3f)" % [
+		railgun.is_scoped(), hip_fov, scoped_fov, rest_offset.x, scoped_offset.x, in_camera.x, in_camera.y])
+	# The probe player is not a local view, so it never builds a HUD. Check the
+	# overlay wiring against a HUD instance directly instead.
+	var hud: CanvasLayer = load("res://scenes/ui/HUD.tscn").instantiate()
+	add_child(hud)
+	await get_tree().process_frame
+	var default_visible: bool = hud.scope_overlay.visible
+	hud.update_scope(true)
+	var on: bool = hud.scope_overlay.visible
+	hud.update_scope(false)
+	var off: bool = hud.scope_overlay.visible
+	var has_shader: bool = hud.scope_overlay.material is ShaderMaterial
+	_log("SCOPE   overrides_aim_fov=%s | HUD overlay default=%s -> update_scope(true)=%s -> (false)=%s, blur shader attached=%s" % [
+		railgun.overrides_aim_fov(), default_visible, on, off, has_shader])
+	hud.queue_free()
+	_player.probe_aim = false
+
+## IMPROVEMENT - slugs fired from space fall into gravity wells much harder.
+func _test_slug_gravity() -> void:
+	# Pick a live body at runtime: the buster phases above deliberately shatter
+	# planets, so naming one here would be a race against its own test suite.
+	var body: OrbitalBody = null
+	for candidate in GravityManager.get_bodies():
+		if is_instance_valid(candidate) and not candidate.is_shattered and candidate.radius >= 15.0:
+			body = candidate
+			break
+	if body == null:
+		_log("SLUG    no intact planet left to test against")
+		return
+	var scene: PackedScene = load("res://scenes/weapons/Slug.tscn")
+	var slug: Slug = scene.instantiate()
+	get_tree().current_scene.add_child(slug)
+	slug.global_position = body.global_position + Vector3(0, body.radius + 60.0, 0)
+	var ground: float = slug._flight_gravity_multiplier()
+	slug.global_position = body.global_position + Vector3(0, body.radius + 3.0, 0)
+	var surface: float = slug._flight_gravity_multiplier()
+	_log("SLUG    gravity multiplier: near surface %.1fx, out in space %.1fx | aggro range %.0fm, slither %.0f m/s" % [
+		surface, ground, slug.tracking_range, slug.slither_speed])
+	slug.queue_free()
+
+
+## MAIN MENU option - starting with the complete arsenal, buster included.
+func _test_all_weapons_option() -> void:
+	var menu: Control = load("res://scenes/ui/MainMenu.tscn").instantiate()
+	add_child(menu)
+	await get_tree().process_frame
+	var has_checkbox: bool = menu.get_node_or_null("CenterContainer/VBoxContainer/AllWeaponsCheck") != null
+	menu.queue_free()
+
+	var scene: PackedScene = load("res://scenes/player/Player.tscn")
+	MatchState.start_with_all_weapons = false
+	var plain: Player = scene.instantiate()
+	plain.set_script(ProbePlayer)
+	plain.name = "LoadoutProbePlain"
+	_arena.get_node("Players").add_child(plain, true)
+	await get_tree().physics_frame
+	var without: Array[String] = plain.weapon_manager.get_weapon_names()
+	plain.queue_free()
+
+	MatchState.start_with_all_weapons = true
+	var loaded: Player = scene.instantiate()
+	loaded.set_script(ProbePlayer)
+	loaded.name = "LoadoutProbeAll"
+	_arena.get_node("Players").add_child(loaded, true)
+	await get_tree().physics_frame
+	var with_all: Array[String] = loaded.weapon_manager.get_weapon_names()
+	loaded.queue_free()
+	MatchState.start_with_all_weapons = false
+
+	_log("MENU    checkbox present=%s | unchecked loadout=[%s] | checked loadout=[%s]" % [
+		has_checkbox, ", ".join(without), ", ".join(with_all)])

@@ -17,9 +17,16 @@ extends Projectile
 enum State { FLYING, SLITHERING }
 
 @export var damage: float = 40.0
-@export var turn_rate_degrees: float = 150.0
-@export var tracking_range: float = 45.0
-@export var slither_speed: float = 7.0
+@export var turn_rate_degrees: float = 220.0
+## How far a landed slug will look for someone to crawl at. Deliberately long -
+## a slug that only noticed you inside 45m was easy to simply walk away from.
+@export var tracking_range: float = 140.0
+@export var slither_speed: float = 11.0
+## Extra gravity felt while flying above `space_altitude`. A slug fired between
+## planets should visibly fall into whichever well it passes, arcing around it,
+## rather than sailing past on a nearly straight line.
+@export var space_gravity_multiplier: float = 3.4
+@export var space_altitude: float = 15.0
 @export var max_hp: float = 25.0  ## slugs can be shot and killed mid-flight
 
 var _hp: float = 25.0
@@ -55,7 +62,7 @@ func _physics_process(delta: float) -> void:
 
 func _process_flying(delta: float) -> void:
 	if affected_by_gravity:
-		velocity += GravityManager.get_gravity_at(global_position) * gravity_multiplier * delta
+		velocity += GravityManager.get_gravity_at(global_position) * _flight_gravity_multiplier() * delta
 	var motion: Vector3 = velocity * delta
 	var collision: KinematicCollision3D = move_and_collide(motion)
 	if collision == null:
@@ -65,6 +72,18 @@ func _process_flying(delta: float) -> void:
 		_land_on_surface(collider.get_meta("orbital_body"), collision.get_position(), collision.get_normal())
 	elif collider and collider != owner_player and collider.has_method("apply_damage"):
 		_hit_player(collider, collision.get_position())
+
+## Gravity bites harder the further from any surface the slug is, which is what
+## turns a shot fired from open space into a curving dive into the nearest well
+## instead of a flat line across the arena.
+func _flight_gravity_multiplier() -> float:
+	var body: OrbitalBody = GravityManager.get_nearest_body(global_position)
+	if body == null:
+		return gravity_multiplier
+	var altitude: float = global_position.distance_to(body.global_position) - body.radius
+	if altitude <= space_altitude:
+		return gravity_multiplier
+	return gravity_multiplier * space_gravity_multiplier
 
 func _land_on_surface(body: OrbitalBody, hit_pos: Vector3, hit_normal: Vector3) -> void:
 	_state = State.SLITHERING

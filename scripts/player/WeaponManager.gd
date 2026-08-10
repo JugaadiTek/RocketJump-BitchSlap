@@ -26,6 +26,11 @@ func _ready() -> void:
 	_add_starting_weapon(slug_launcher_scene)
 	_add_starting_weapon(grappling_hook_scene)
 	_add_starting_weapon(space_board_scene)
+	# Testing option from the main menu: hand out the pickup-only Planet Buster
+	# up front instead of making someone find a pad first.
+	if MatchState.start_with_all_weapons:
+		grant_weapon("planetbuster")
+		_current_index = 0
 	_update_visibility()
 
 func _add_starting_weapon(scene: PackedScene) -> void:

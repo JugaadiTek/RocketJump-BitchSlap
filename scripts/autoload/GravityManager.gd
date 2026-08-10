@@ -15,16 +15,54 @@ extends Node
 ## influence radius, so players who rocket-jump way out into open space drift
 ## slowly back toward the arena instead of floating away forever.
 const DEEP_SPACE_PULL: float = 0.6
-const DEEP_SPACE_MAX_DISTANCE: float = 525.0
+const DEEP_SPACE_MAX_DISTANCE: float = 420.0
 
 ## Hard edge of playable space, measured from the arena center (world
 ## origin). Beyond this, Player._apply_arena_bounds() fires a strong push
 ## back toward the nearest planet, and ArenaBoundary.gd's shell becomes
 ## visible nearby. Comfortably past the outermost body (Halcyon: orbit_radius
-## 570 + radius 36 = 606 max reach).
-const ARENA_BOUNDARY_RADIUS: float = 665.0
+## 440 + radius 36 = 476 max reach).
+const ARENA_BOUNDARY_RADIUS: float = 535.0
 
 var _bodies: Array[OrbitalBody] = []
+## Last frame's separation per body pair, so a structural collision only counts
+## while the two are actually closing on each other.
+var _previous_separation: Dictionary = {}
+
+## Two planets whose buildings are grinding into each other both take an orbital
+## kick. Checked here rather than with real collision shapes because the towers
+## are static geometry on kinematic bodies - nothing in the physics engine is
+## watching for planet-on-planet contact, and with ~11 bodies the pair scan is
+## far cheaper than making them all colliding rigid bodies.
+func _physics_process(_delta: float) -> void:
+	for i in range(_bodies.size()):
+		var a: OrbitalBody = _bodies[i]
+		if not is_instance_valid(a) or a.is_shattered or a.collision_cooldown > 0.0:
+			continue
+		for j in range(i + 1, _bodies.size()):
+			var b: OrbitalBody = _bodies[j]
+			if not is_instance_valid(b) or b.is_shattered or b.collision_cooldown > 0.0:
+				continue
+			# A moon orbiting its own parent is permanently "near" it; only count
+			# bodies that are genuinely independent of one another.
+			if a.orbit_pivot == b or b.orbit_pivot == a:
+				continue
+			var contact_distance: float = a.radius + a.structure_reach + b.radius + b.structure_reach
+			var separation: float = a.global_position.distance_to(b.global_position)
+			if separation > contact_distance:
+				_previous_separation[[a, b]] = separation
+				continue
+			# Only fire while they are still CLOSING. Two bodies parked at a
+			# constant separation (a phase-locked pair, or one left overlapping
+			# after an earlier hit) would otherwise register a fresh collision
+			# every cooldown and walk their orbits apart without end.
+			var was: float = _previous_separation.get([a, b], separation + 1.0)
+			_previous_separation[[a, b]] = separation
+			# Needs a real closing rate, not float jitter around a fixed distance.
+			if separation >= was - 0.05:
+				continue
+			a.structural_collision(b)
+			b.structural_collision(a)
 
 func register_body(body: OrbitalBody) -> void:
 	if not _bodies.has(body):
@@ -32,6 +70,9 @@ func register_body(body: OrbitalBody) -> void:
 
 func unregister_body(body: OrbitalBody) -> void:
 	_bodies.erase(body)
+	for key in _previous_separation.keys():
+		if key.has(body):
+			_previous_separation.erase(key)
 
 func get_bodies() -> Array[OrbitalBody]:
 	return _bodies

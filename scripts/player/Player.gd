@@ -24,6 +24,11 @@ extends CharacterBody3D
 ## into a moon-launch on a small/low-gravity body.
 @export var jump_height: float = 1.1
 @export var align_to_gravity_speed: float = 10.0 ## rad/sec, how fast the body re-levels on a new planet
+## How fast the *target* up itself eases toward a new one, in 1/sec. Entering a
+## planet's well swaps the reference for "up" from summed gravity to that
+## planet's radial direction, which is a step change; easing the target as well
+## as the body's rotation turns that step into a glide. Lower = gentler.
+@export var up_blend_rate: float = 4.5
 
 @export_group("Ground Stick")
 ## Within this many meters of a planet's surface, an extra corrective pull
@@ -95,6 +100,8 @@ var _frame_body: OrbitalBody = null
 var _platform_velocity: Vector3 = Vector3.ZERO
 ## The Ladder volume we're currently standing in, if any (set by Ladder.gd).
 var _ladder: Node3D = null
+## Eased "up", chasing the raw target from _get_up_direction() - see _smoothed_up.
+var _up_smoothed: Vector3 = Vector3.ZERO
 
 ## Grappling cable state, written by GrapplingHook and read by HookVisual.
 ## Replicated (see _setup_replication) so everyone can see who is grappling
@@ -197,7 +204,7 @@ func _physics_process(delta: float) -> void:
 
 	current_gravity = GravityManager.get_gravity_at(global_position)
 	_update_planet_frame(delta)
-	var new_up: Vector3 = _get_up_direction()
+	var new_up: Vector3 = _smoothed_up(delta)
 	_align_body_to_up(new_up, delta)
 	up_direction = new_up
 
@@ -234,6 +241,7 @@ func _physics_process(delta: float) -> void:
 			hud.update_charge_bar(active_weapon.get_charge(), true)
 		else:
 			hud.update_charge_bar(0.0, false)
+		hud.update_scope(active_weapon != null and active_weapon.has_method("is_scoped") and active_weapon.is_scoped())
 		# Planet buster lock-on indicator
 		if active_weapon and active_weapon is PlanetBuster:
 			hud.update_lock_indicator(active_weapon.get_aimed_candidate(), active_weapon.get_lock_target(), active_weapon.get_lock_progress())
@@ -306,6 +314,26 @@ func set_world_velocity(world_velocity: Vector3) -> void:
 ## CharacterBody3D classify the sphere underfoot as a wall past floor_max_angle -
 ## which is felt as an invisible wall partway around a planet. Falls back to
 ## gravity in open space, where there's no surface to be radial to.
+## The up we actually use, eased toward the raw target rather than snapped to
+## it. Crossing into a planet's influence swaps the definition of "up" from
+## summed gravity to that planet's radial direction in a single frame; feeding
+## that step straight into up_direction and _align_body_to_up() is what made
+## entering a gravity well jolt. Easing here means the body's re-levelling
+## chases a target that is itself already moving smoothly.
+func _smoothed_up(delta: float) -> Vector3:
+	var target: Vector3 = _get_up_direction()
+	if not _has_aligned_once or _up_smoothed.length_squared() < 0.0001:
+		_up_smoothed = target
+		return target
+	# Exponential approach: frame-rate independent, and eases out naturally as
+	# it converges instead of stopping dead like a constant-rate turn.
+	var t: float = 1.0 - exp(-up_blend_rate * delta)
+	if _up_smoothed.dot(target) < -0.9999:
+		# Exactly antipodal - slerp has no defined arc, so nudge off the pole.
+		_up_smoothed = (_up_smoothed + global_transform.basis.x * 0.01).normalized()
+	_up_smoothed = _up_smoothed.slerp(target, t).normalized()
+	return _up_smoothed
+
 func _get_up_direction() -> Vector3:
 	if _frame_body != null and is_instance_valid(_frame_body) and not _frame_body.is_shattered:
 		var radial: Vector3 = global_position - _frame_body.global_position
@@ -414,6 +442,11 @@ func _apply_aim(delta: float) -> void:
 	is_aiming = _wants_aim()
 	if camera == null:
 		return
+	# A weapon with its own optic (the railgun scope) owns the FOV while it's
+	# out; running the generic ADS zoom too would make the two lerps fight.
+	var active: Weapon = weapon_manager.get_active_weapon() if weapon_manager else null
+	if active and active.overrides_aim_fov():
+		return
 	var target_fov: float = ads_fov_degrees if is_aiming else hipfire_fov_degrees
 	var t: float = clamp(ads_transition_speed * delta, 0.0, 1.0)
 	camera.fov = lerp(camera.fov, target_fov, t)
@@ -438,8 +471,12 @@ func _align_body_to_up(new_up: Vector3, delta: float) -> void:
 		rotation_axis = global_transform.basis.x
 	rotation_axis = rotation_axis.normalized()
 	var angle_to_target: float = current_up.angle_to(new_up)
-	var max_angle_this_frame: float = align_to_gravity_speed * delta
-	var t: float = min(angle_to_target, max_angle_this_frame)
+	# Exponential approach rather than a flat rad/sec sweep: a constant-rate turn
+	# arrives at full speed and stops dead, which is the jolt you feel landing on
+	# a new planet. This eases out into alignment, and is still capped by
+	# align_to_gravity_speed for very large reorientations.
+	var eased: float = angle_to_target * (1.0 - exp(-align_to_gravity_speed * delta))
+	var t: float = min(angle_to_target, maxf(eased, 0.0))
 	var q := Quaternion(rotation_axis, t)
 	global_transform.basis = (Basis(q) * global_transform.basis).orthonormalized()
 
@@ -752,6 +789,20 @@ func get_spawn_aim_window() -> float:
 
 func pick_spawn_target() -> OrbitalBody:
 	return GravityManager.get_nearest_body(global_position)
+
+## True only for the human sitting at this screen. Third-person body attachments
+## (see WeaponModel) hide themselves on this, or they'd hang in your own view
+## next to the first-person viewmodel.
+func is_first_person_view() -> bool:
+	return is_multiplayer_authority() and _is_local_view()
+
+## Health pickups. Capped at max_health and refused while dead, so a pack can't
+## be burned on a corpse mid-respawn.
+func heal(amount: float) -> bool:
+	if is_dead or amount <= 0.0 or health >= max_health:
+		return false
+	health = minf(health + amount, max_health)
+	return true
 
 func get_look_direction() -> Vector3:
 	return -camera.global_transform.basis.z

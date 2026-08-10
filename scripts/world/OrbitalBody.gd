@@ -44,6 +44,14 @@ var motion_delta: Transform3D = Transform3D.IDENTITY
 var _prev_global_transform: Transform3D = Transform3D.IDENTITY
 var _motion_delta_time: float = 0.0
 var _orbit_angle: float = 0.0
+## Height of the tallest structure standing on this body, and a cooldown so a
+## single grinding encounter between two planets registers once rather than
+## every physics frame. See GravityManager._physics_process.
+var structure_reach: float = 0.0
+var collision_cooldown: float = 0.0
+## Baked surface geometry, populated the first time apply_crater() runs.
+var _crater_arrays: Array = []
+var _crater_vertices: PackedVector3Array = PackedVector3Array()
 ## Bodies with eccentricity use semi-major (orbit_radius) and semi-minor
 ## (_semi_minor) axes to trace an ellipse instead of a circle.
 var _semi_minor: float = 0.0
@@ -78,11 +86,71 @@ func _ready() -> void:
 func _apply_visual_scale() -> void:
 	if not is_inside_tree():
 		return
-	if mesh and mesh.mesh:
+	# Once the surface has been cratered the mesh is a baked ArrayMesh with no
+	# radius to set; resizing then would also wipe the craters, so skip it.
+	if mesh and mesh.mesh is SphereMesh:
 		mesh.mesh.radius = radius
 		mesh.mesh.height = radius * 2.0
 	if collision and collision.shape is SphereShape3D:
 		collision.shape.radius = radius
+
+## Dents the visible surface where something slammed into it.
+##
+## The mesh starts life as a SphereMesh primitive, which has no vertices to
+## move, so the first crater bakes it down to an ArrayMesh we then keep editing
+## in place. Purely cosmetic: the collision stays a perfect SphereShape3D, so
+## players walk over a crater rather than down into it - giving craters real
+## collision would mean rebuilding a ~1200-triangle concave shape per impact.
+func apply_crater(world_point: Vector3, crater_radius: float, depth: float) -> void:
+	if is_shattered or mesh == null or crater_radius <= 0.01:
+		return
+	_ensure_deformable_mesh()
+	if _crater_vertices.is_empty():
+		return
+
+	# Project the impact onto the surface, in the planet's own local space so
+	# craters ride along with its orbit and spin.
+	var local_hit: Vector3 = (to_local(world_point)).normalized() * radius
+	var changed: bool = false
+	for i in range(_crater_vertices.size()):
+		var v: Vector3 = _crater_vertices[i]
+		var dist: float = v.distance_to(local_hit)
+		if dist > crater_radius:
+			continue
+		# Cosine bowl with a raised lip near the rim, so it reads as an impact
+		# crater rather than a smooth dimple.
+		var t: float = dist / crater_radius
+		var bowl: float = cos(t * PI * 0.5)
+		var rim: float = -0.28 * sin(t * PI) * t
+		var displacement: float = depth * (bowl + rim)
+		if absf(displacement) < 0.0005:
+			continue
+		_crater_vertices[i] = v - v.normalized() * displacement
+		changed = true
+	if not changed:
+		return
+
+	_crater_arrays[Mesh.ARRAY_VERTEX] = _crater_vertices
+	_rebuild_cratered_mesh()
+
+func _ensure_deformable_mesh() -> void:
+	if not _crater_vertices.is_empty():
+		return
+	var source: Mesh = mesh.mesh
+	if source == null or source.get_surface_count() == 0:
+		return
+	_crater_arrays = source.surface_get_arrays(0)
+	_crater_vertices = _crater_arrays[Mesh.ARRAY_VERTEX]
+
+## Normals have to be regenerated from the moved vertices or the crater is
+## invisible - the shading, not the silhouette, is what makes it read.
+func _rebuild_cratered_mesh() -> void:
+	var rebuilt := ArrayMesh.new()
+	rebuilt.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, _crater_arrays)
+	var st := SurfaceTool.new()
+	st.create_from(rebuilt, 0)
+	st.generate_normals()
+	mesh.mesh = st.commit()
 
 func _physics_process(delta: float) -> void:
 	if is_shattered:
@@ -95,7 +163,14 @@ func _physics_process(delta: float) -> void:
 		_check_boundary()
 	if spin_speed != 0.0:
 		rotate(spin_axis.normalized(), spin_speed * delta)
+	if collision_cooldown > 0.0:
+		collision_cooldown -= delta
 	_update_motion_delta(delta)
+
+## Records a building's height so GravityManager knows how far this body's
+## structures stick out when checking whether two planets are grinding together.
+func note_structure(height: float) -> void:
+	structure_reach = maxf(structure_reach, height)
 
 func _update_motion_delta(delta: float) -> void:
 	motion_delta = global_transform * _prev_global_transform.affine_inverse()
@@ -145,6 +220,36 @@ func perturb_orbit(impact_strength: float = 1.0) -> void:
 		orbit_axis = (orbit_axis + Vector3(
 			randf_range(-0.01, 0.01), randf_range(-0.01, 0.01), randf_range(-0.01, 0.01)
 		)).normalized()
+
+## Two planets have drifted close enough that the buildings on their surfaces
+## are colliding. Unlike perturb_orbit()'s sub-1% drift, this is a real impact:
+## the outer body is flung further out and slowed, the inner one is dragged in
+## and sped up, scaled by their relative mass so a moon bounces off a planet
+## rather than the other way round. Also craters both at the contact point.
+func structural_collision(other: OrbitalBody) -> void:
+	if is_shattered or other.is_shattered or orbit_pivot == null:
+		return
+	# Mass goes as radius cubed, so a big world barely notices a small one.
+	var own_mass: float = pow(radius, 3.0)
+	var other_mass: float = pow(other.radius, 3.0)
+	var share: float = other_mass / maxf(own_mass + other_mass, 0.001)
+
+	var outward: float = 1.0 if orbit_radius >= other.orbit_radius else -1.0
+	var kick: float = clampf(share, 0.0, 0.9) * randf_range(0.04, 0.09)
+	orbit_radius = maxf(orbit_radius * (1.0 + outward * kick), radius * 1.5)
+	# Pushed outward means slowing down, dragged inward means speeding up.
+	orbit_speed *= (1.0 - outward * kick * 0.5)
+	orbit_eccentricity = clampf(orbit_eccentricity + share * randf_range(0.01, 0.05), 0.0, 0.7)
+	_semi_minor = orbit_radius * (1.0 - orbit_eccentricity)
+	# Tilt the orbital plane a little - a glancing blow shouldn't leave both
+	# bodies in exactly the same plane they started in.
+	orbit_axis = (orbit_axis + Vector3(
+		randf_range(-0.05, 0.05), randf_range(-0.05, 0.05), randf_range(-0.05, 0.05)
+	) * share).normalized()
+
+	var contact: Vector3 = global_position + (other.global_position - global_position).normalized() * radius
+	apply_crater(contact, clampf(radius * 0.3, 2.0, 12.0), clampf(radius * 0.1, 0.8, 4.0))
+	collision_cooldown = 3.0
 
 func shatter(blast_radius: float, blast_damage: float) -> void:
 	if is_shattered:

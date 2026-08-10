@@ -64,6 +64,11 @@ func fire(muzzle_transform: Transform3D, aim_direction: Vector3) -> bool:
 func _do_fire(_muzzle_transform: Transform3D, _aim_direction: Vector3) -> void:
 	pass # override
 
+## True if this weapon drives the camera FOV itself (the railgun's scope), in
+## which case Player._apply_aim() leaves the FOV alone rather than fighting it.
+func overrides_aim_fov() -> bool:
+	return false
+
 ## Called by WeaponManager when this weapon stops being the active one. Only
 ## the active weapon gets ticked, so anything with persistent world state needs
 ## to unwind it here (see GrapplingHook).

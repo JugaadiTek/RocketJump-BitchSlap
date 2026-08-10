@@ -12,6 +12,11 @@ var spawn_points: Array[Node3D] = []
 var scores: Dictionary = {} # player_id -> int
 var registered_players: Dictionary = {} # player_id -> display_name
 
+## Testing option set on the main menu: everyone starts holding the complete
+## arsenal, planet buster included, instead of earning the buster from a pickup.
+## Lives here because it has to survive the scene change into the Arena.
+var start_with_all_weapons: bool = false
+
 func register_spawn_point(point: Node3D) -> void:
 	if not spawn_points.has(point):
 		spawn_points.append(point)

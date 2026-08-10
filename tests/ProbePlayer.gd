@@ -8,6 +8,7 @@ var probe_jump: bool = false
 var probe_descend: bool = false
 var probe_fire: bool = false
 var probe_switch: int = -1
+var probe_aim: bool = false
 
 func _is_local_view() -> bool: return false
 func _uses_mouse_look() -> bool: return false
@@ -17,7 +18,7 @@ func _get_look_delta() -> Vector2: return Vector2.ZERO
 func _wants_jump() -> bool: return probe_jump
 func _wants_descend() -> bool: return probe_descend
 func _wants_fire() -> bool: return probe_fire
-func _wants_aim() -> bool: return false
+func _wants_aim() -> bool: return probe_aim
 func _wants_melee() -> bool: return false
 func _wants_scoreboard() -> bool: return false
 func _get_weapon_scroll() -> int: return 0

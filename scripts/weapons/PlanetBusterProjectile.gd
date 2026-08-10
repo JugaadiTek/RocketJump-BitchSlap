@@ -28,6 +28,41 @@ func _ready() -> void:
 	affected_by_gravity = false
 	inherit_shooter_velocity = false
 	_course_timer = course_update_interval
+	_spawn_smoke_trail()
+
+## A siege shell crossing hundreds of metres should be visible from anywhere in
+## the arena - the trail is the telegraph that gives everyone a chance to react
+## before a planet comes apart. Emitted in world space (local_coords off) so it
+## hangs in the sky behind the shell rather than dragging along with it.
+func _spawn_smoke_trail() -> void:
+	var smoke := GPUParticles3D.new()
+	add_child(smoke)
+	var mat := ParticleProcessMaterial.new()
+	mat.direction = Vector3(0, 1, 0)
+	mat.spread = 60.0
+	mat.initial_velocity_min = 1.0
+	mat.initial_velocity_max = 7.0
+	mat.gravity = Vector3.ZERO
+	mat.scale_min = 2.0
+	mat.scale_max = 5.5
+	mat.color = Color(0.72, 0.24, 0.95, 0.85)
+	smoke.process_material = mat
+	var puff := SphereMesh.new()
+	puff.radial_segments = 8
+	puff.rings = 4
+	var puff_mat := StandardMaterial3D.new()
+	puff_mat.albedo_color = Color(0.55, 0.18, 0.85, 0.75)
+	puff_mat.emission_enabled = true
+	puff_mat.emission = Color(0.75, 0.3, 1.0, 1.0)
+	puff_mat.emission_energy_multiplier = 2.5
+	puff_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	puff_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	puff.material = puff_mat
+	smoke.draw_pass_1 = puff
+	smoke.amount = 320
+	smoke.lifetime = 4.5
+	smoke.local_coords = false
+	smoke.emitting = true
 
 func _steer(delta: float) -> void:
 	if _course_dir.length_squared() < 0.0001:

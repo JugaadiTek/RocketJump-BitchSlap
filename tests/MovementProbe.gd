@@ -41,10 +41,11 @@ func _ready() -> void:
 	await get_tree().physics_frame
 	await get_tree().physics_frame
 
-	# Ferrum: orbit_radius 230 at 0.0525 rad/s = ~12 m/s of orbital travel,
-	# comfortably faster than max_ground_speed (9). This is the case that made
-	# all three bugs reproduce.
-	_body = _arena.get_node("OrbitalBodies/Ferrum")
+	# Verdant: the fastest-travelling body (orbit_radius 210 at 0.035 rad/s =
+	# ~7.4 m/s) that is also big enough (r44) for the WALL measurement below to
+	# stay unambiguous - on a small planet 3s of running wraps past half the
+	# circumference, and the unsigned great-circle angle then aliases back down.
+	_body = _arena.get_node("OrbitalBodies/Verdant")
 	_clear_surface_obstacles()
 
 	var scene: PackedScene = load("res://scenes/player/Player.tscn")

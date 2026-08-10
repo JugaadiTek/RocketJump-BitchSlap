@@ -8,6 +8,7 @@ const ARENA_SCENE_PATH: String = "res://scenes/world/Arena.tscn"
 @onready var host_button: Button = $CenterContainer/VBoxContainer/HostButton
 @onready var join_button: Button = $CenterContainer/VBoxContainer/JoinRow/JoinButton
 @onready var offline_button: Button = $CenterContainer/VBoxContainer/OfflineButton
+@onready var all_weapons_check: CheckBox = $CenterContainer/VBoxContainer/AllWeaponsCheck
 
 func _ready() -> void:
 	host_button.pressed.connect(_on_host_pressed)
@@ -16,12 +17,19 @@ func _ready() -> void:
 	NetworkManager.connected_to_server.connect(_on_connected_to_server)
 	NetworkManager.connection_failed.connect(_on_connection_failed)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	all_weapons_check.button_pressed = MatchState.start_with_all_weapons
+
+## Stashed on MatchState rather than passed along, because every entry point
+## below leaves this scene behind - the flag has to outlive it.
+func _apply_options() -> void:
+	MatchState.start_with_all_weapons = all_weapons_check.button_pressed
 
 func _get_port() -> int:
 	var value: int = port_field.text.to_int()
 	return value if value > 0 else NetworkManager.DEFAULT_PORT
 
 func _on_host_pressed() -> void:
+	_apply_options()
 	status_label.text = "Starting server..."
 	var err: Error = NetworkManager.host_game(_get_port())
 	if err != OK:
@@ -30,6 +38,7 @@ func _on_host_pressed() -> void:
 	get_tree().change_scene_to_file(ARENA_SCENE_PATH)
 
 func _on_join_pressed() -> void:
+	_apply_options()
 	var address: String = ip_field.text.strip_edges()
 	if address.is_empty():
 		address = "127.0.0.1"
@@ -45,4 +54,5 @@ func _on_connection_failed() -> void:
 	status_label.text = "Connection failed."
 
 func _on_offline_pressed() -> void:
+	_apply_options()
 	get_tree().change_scene_to_file(ARENA_SCENE_PATH)

@@ -65,3 +65,12 @@ func _build() -> void:
 	# Roof.
 	_add_box(Vector3(0.0, tower_height + floor_thickness * 0.5, 0.0),
 		Vector3(tower_width, floor_thickness, tower_width), _tint * 0.82)
+
+	# Plinth sinking the flat base into the curved surface.
+	_add_foundation(half, half)
+
+func footprint_radius() -> float:
+	return tower_width * 0.7072
+
+func structure_height() -> float:
+	return tower_height + floor_thickness

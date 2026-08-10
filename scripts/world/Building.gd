@@ -22,6 +22,10 @@ extends Node3D
 @export var window_width: float = 2.4
 @export var window_height: float = 1.8
 @export var window_sill: float = 1.1  ## height of the window opening's lower edge
+## Radius of the planet this is standing on. Arena sets it before add_child();
+## the foundation needs it to work out how far the surface falls away under the
+## building's flat base.
+@export var host_radius: float = 40.0
 
 enum Cutout { NONE, DOOR, WINDOW }
 
@@ -38,6 +42,37 @@ func _ready() -> void:
 
 func _build() -> void:
 	pass # override
+
+## Half the footprint's diagonal - how far the outermost corner reaches from the
+## centre. Subclasses override; the foundation and Arena both need it.
+func footprint_radius() -> float:
+	return 4.0
+
+## Fills the gap under a flat-based building sitting on a curved planet.
+##
+## The base plane is tangent to the sphere at the centre point, so the surface
+## drops away toward the corners by the sagitta - which is why buildings looked
+## like they were floating on their outer edges. A plinth extending that far
+## below the base plane meets the surface at the corners and is buried
+## everywhere else, so the building reads as sunk into the ground rather than
+## perched on it. Stepped in two tiers so it looks deliberate.
+func _add_foundation(half_x: float, half_z: float) -> void:
+	var corner: float = sqrt(half_x * half_x + half_z * half_z)
+	var sagitta: float = host_radius - sqrt(maxf(host_radius * host_radius - corner * corner, 0.0))
+	var depth: float = sagitta + 0.6
+	if depth <= 0.05:
+		return
+	# Outer tier: full footprint, reaching all the way down to the corner gap.
+	_add_box(Vector3(0.0, -depth * 0.5, 0.0),
+		Vector3(half_x * 2.0 + wall_thickness, depth, half_z * 2.0 + wall_thickness), _tint * 0.7)
+	# Inner tier sits proud of it, giving the base a stepped plinth silhouette.
+	_add_box(Vector3(0.0, -depth * 0.18, 0.0),
+		Vector3(half_x * 2.3, depth * 0.36, half_z * 2.3), _tint * 0.78)
+
+## Tallest point above the surface, used to work out when two planets have
+## brought their structures into contact (see GravityManager).
+func structure_height() -> float:
+	return 4.0
 
 ## One solid piece: a visible box plus matching collision on the shared body.
 func _add_box(pos: Vector3, size: Vector3, color: Color, solid: bool = true) -> void:

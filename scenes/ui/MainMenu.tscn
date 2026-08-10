@@ -64,6 +64,10 @@ size_flags_horizontal = 3
 text = "7777"
 placeholder_text = "7777"
 
+[node name="AllWeaponsCheck" type="CheckBox" parent="CenterContainer/VBoxContainer" unique_id=902238841]
+layout_mode = 2
+text = "Start with all weapons (testing)"
+
 [node name="StatusLabel" type="Label" parent="CenterContainer/VBoxContainer" unique_id=902238840]
 layout_mode = 2
 horizontal_alignment = 1

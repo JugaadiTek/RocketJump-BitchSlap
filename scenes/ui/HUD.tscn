@@ -1,7 +1,17 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/HUD.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/ui/Crosshair.gd" id="2"]
+[ext_resource type="Shader" path="res://scenes/ui/scope.gdshader" id="3"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_scope"]
+shader = ExtResource("3")
+shader_parameter/scope_radius = 0.32
+shader_parameter/edge_softness = 0.05
+shader_parameter/blur_strength = 4.0
+shader_parameter/outside_darkness = 0.72
+shader_parameter/ring_thickness = 0.006
+shader_parameter/reticle_color = Color(0.35, 0.85, 1, 1)
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_scoreboard"]
 bg_color = Color(0.05, 0.05, 0.08, 0.88)
@@ -279,3 +289,15 @@ theme_override_font_sizes/font_size = 20
 horizontal_alignment = 1
 vertical_alignment = 1
 text = "LOCK"
+
+[node name="ScopeOverlay" type="ColorRect" parent="Root"]
+material = SubResource("ShaderMaterial_scope")
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(1, 1, 1, 1)

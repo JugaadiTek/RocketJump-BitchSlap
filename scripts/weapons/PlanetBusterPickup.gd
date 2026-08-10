@@ -29,4 +29,7 @@ func _set_available(value: bool) -> void:
 	_available = value
 	if visual:
 		visual.visible = value
-	monitoring = value
+	# Deferred: _set_available() is reached from inside the body_entered
+	# signal, and Area3D refuses a direct write to `monitoring` while it is
+	# mid-dispatch of that signal.
+	set_deferred("monitoring", value)
