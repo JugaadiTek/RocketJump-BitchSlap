@@ -7,6 +7,67 @@ in [`tests/`](../tests) — see **Test harness** at the bottom.
 
 ---
 
+## 2026-08-13 — Session 15: multiplayer connection verification - CRITICAL join bug found, not fixed
+
+Requested: verify multiplayer connections over the internet. Two honest
+limits on what that can mean from this environment, stated up front rather
+than glossed over:
+
+- **No real internet test was possible.** This sandbox has no second real
+  machine on a different network, no public IP, and no access to a router to
+  port-forward. `NetworkManager.gd` is bare ENet direct-IP with no UPnP/STUN/
+  relay of any kind (confirmed by reading it - `host_game()`/`join_game()`
+  wrap `ENetMultiplayerPeer` directly, nothing else), so genuine internet play
+  additionally requires the host to forward their configured UDP port on
+  their router and the joining player to use the host's public IP - neither
+  of which this pass could exercise.
+- **What WAS actually run**: two independent, real Godot processes on this
+  machine - one driving `NetworkManager.host_game()`, one driving
+  `NetworkManager.join_game()` against `127.0.0.1` - reproducing the exact
+  same calls `MainMenu.gd`'s Host/Join buttons make, not a code-reading
+  guess. New permanent probes: `tests/NetHostProbe.gd`/`NetClientProbe.gd`.
+
+### CRITICAL, reproducible: a joining client never actually completes connecting
+Run four times (varying only the timeout, 15s/60s/25s/25s, to rule out "just
+slow"). Every run: the HOST'S side completes fully - `peer_connected` fires,
+a `Player` node is spawned and successfully replicates
+(`t+7-9s peers=[<id>] players_in_world=[Player_1, Player_<id>]`) - but the
+**client's own `connected_to_server` signal never fires, even once, even
+given 60 real seconds**. `MainMenu._on_join_pressed()` only transitions to
+the Arena scene once that signal fires - so from a real joining player's
+point of view this doesn't read as "slow," it reads as "stuck on Connecting...
+forever," on a genuine ENet connection the host can see is live.
+
+Direct evidence pointing at the mechanism: the moment the raw ENet peer
+connects, the client's log fills with `Node not found: "Arena/BotSpawner"
+(relative to "/root")`, `spawner is null`, and repeated `Ignoring delta for
+non-authority or invalid synchronizer` - the SERVER appears to start
+replicating its already-spawned nodes (itself, any bots) to the brand-new
+peer immediately, using absolute paths like `/root/Arena/...`, while the
+CLIENT is still sitting on whatever scene it was on before Join was pressed
+(`change_scene_to_file(Arena)` only happens AFTER `connected_to_server`,
+per `MainMenu.gd`) - so those paths don't exist yet on the client's side.
+Leading theory: that mismatch is what's actually stalling the
+connection-completion handshake itself, not just spamming harmless errors.
+This isn't a "your NAT is in the way" story - it reproduced identically on
+`127.0.0.1`, same machine, zero latency, four times.
+
+**Not fixed in this pass** - the ask was to verify, and this needs a
+deliberate call on the right fix (e.g. having the server explicitly resync
+existing world state to a peer once it's confirmed connected, or having the
+client load Arena - or at least register the matching node paths - before
+its own join call rather than after) rather than a quick patch. Flagged here
+prominently because it's more severe than "internet play might be flaky" -
+as verified, a second player cannot join a hosted game AT ALL, over any
+network, including the same machine.
+[scripts/autoload/NetworkManager.gd](../scripts/autoload/NetworkManager.gd),
+[scripts/ui/MainMenu.gd](../scripts/ui/MainMenu.gd),
+[scripts/world/Arena.gd](../scripts/world/Arena.gd),
+[tests/NetHostProbe.gd](../tests/NetHostProbe.gd) (new),
+[tests/NetClientProbe.gd](../tests/NetClientProbe.gd) (new)
+
+---
+
 ## 2026-08-13 — Session 14: tower height -> diameter, arena boundary hugs each direction independently
 
 Two follow-up tuning requests on top of Session 13.
@@ -1244,6 +1305,14 @@ rather than pass/fail, so regressions show up as changed numbers.
 
 `PerfProbe.tscn` and `LoadProbe.tscn` (see Session 6/12 above) need a real
 renderer, not `--headless`.
+
+`NetHostProbe.tscn`/`NetClientProbe.tscn` (Session 15) are a pair, not a
+single probe - run one of each as SEPARATE OS processes and let the host
+start first:
+```
+Godot --headless --path . res://tests/NetHostProbe.tscn -- 7777          # first, own process
+Godot --headless --path . res://tests/NetClientProbe.tscn -- 127.0.0.1 7777   # second, own process
+```
 
 Results are also written to `/tmp/rjbs_*.log`, flushed per line — a run that has
 to be killed for hanging would otherwise lose everything to stdout buffering.
