@@ -38,7 +38,8 @@ func _on_hit(collider: Object, hit_position: Vector3, hit_normal: Vector3) -> vo
 	if _exploded:
 		return
 	_exploded = true
-	Sfx.play_3d("explosion", hit_position, 1.0, 6.0)
+	# Trimmed from +6 - see OrbitalBody.shatter()'s planet_shatter call for why.
+	Sfx.play_3d("explosion", hit_position, 1.0, 3.0)
 	_explode(hit_position, hit_normal, collider)
 
 func _explode(hit_position: Vector3, hit_normal: Vector3, collider: Object) -> void:

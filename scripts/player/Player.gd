@@ -475,7 +475,10 @@ func _apply_movement(up: Vector3, delta: float) -> void:
 	# stepping off a kerb.
 	var grounded: bool = is_on_floor()
 	if grounded and not _was_grounded and _airborne_speed > 6.0:
-		Sfx.play_3d("land", global_position, 1.0, clampf(-18.0 + _airborne_speed * 0.5, -18.0, 2.0))
+		# Ceiling trimmed from +2 to 0 - see OrbitalBody.shatter()'s
+		# planet_shatter call for why headroom on top of an already
+		# near-full-scale synthesised sound matters.
+		Sfx.play_3d("land", global_position, 1.0, clampf(-18.0 + _airborne_speed * 0.5, -18.0, 0.0))
 	_was_grounded = grounded
 	_airborne_speed = 0.0 if grounded else maxf(_airborne_speed, absf(vel_up))
 

@@ -45,6 +45,24 @@ func _ready() -> void:
 		_voices.append(voice)
 	_ui_player = AudioStreamPlayer.new()
 	add_child(_ui_player)
+	_install_master_limiter()
+
+## QC safety net: _pack() already soft-clips each individual sound's own
+## waveform, but that happens BEFORE the per-play volume_db boost a handful of
+## sounds ask for (planet_shatter, explosion, collapse...) - a soft-clipped
+## signal sitting near 0.7-0.8 full scale, boosted several dB on top at
+## playback, can still exceed 0 dBFS and hard-clip at the output stage, and
+## multiple loud voices overlapping in a firefight stack on top of that again.
+## A brick-wall limiter on the Master bus catches both cases regardless of how
+## any individual sound (present or future) is tuned - cheaper and more robust
+## than trying to hand-balance every volume_db against every possible overlap.
+func _install_master_limiter() -> void:
+	var bus: int = AudioServer.get_bus_index("Master")
+	if bus < 0:
+		return
+	var limiter := AudioEffectLimiter.new()
+	limiter.ceiling_db = -0.3
+	AudioServer.add_bus_effect(bus, limiter)
 
 ## Fires a one-shot at a world position. `pitch` and `volume_db` are the centre
 ## values; the jitter around them is what stops repeats sounding mechanical.

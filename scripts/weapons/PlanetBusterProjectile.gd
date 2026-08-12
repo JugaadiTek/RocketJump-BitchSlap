@@ -21,6 +21,23 @@ var _exploded: bool = false
 var _course_dir: Vector3 = Vector3.ZERO
 var _course_timer: float = 0.0
 
+## The shell leaves the barrel at a deliberately slow 7 m/s (see PlanetBuster)
+## and doesn't inherit the shooter's own velocity. A player moving forward at
+## even a modest clip in open space - Space Board flight, boundary-launch
+## momentum, a recent rocket-jump - easily outpaces that and drifts back into
+## the shell within the first frame or two, since nothing but distance kept
+## them apart. Projectile._on_hit() has no owner check, so that self-touch
+## used to read as a stray hit: _on_hit fires, it's not a shatterable planet,
+## so it does a harmless _small_splash and queue_free()s - the shell simply
+## vanishes without ever reaching the planet it was locked onto. Excluding the
+## shooter from the shell's own collision for its whole flight (not just the
+## first few frames, unlike the generic muzzle-clearance trick other weapons
+## rely on) removes the false hit entirely rather than trying to outrun it.
+func launch(initial_velocity: Vector3, shooter: Node) -> void:
+	super.launch(initial_velocity, shooter)
+	if shooter is CollisionObject3D:
+		add_collision_exception_with(shooter)
+
 func _ready() -> void:
 	super._ready()
 	# A guided shell owns its own path; letting the arena's gravity bend it too

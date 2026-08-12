@@ -28,6 +28,45 @@ var _mesh: MeshInstance3D = null
 var _near_body: OrbitalBody = null
 var _near_refresh: float = 0.0
 
+## Every rock used to bake its own SphereMesh (SurfaceTool + deindex +
+## generate_normals, ~110 times at DebrisField spawn) AND get its own unique
+## StandardMaterial3D. Identical mesh data baked 110 times over is wasted CPU
+## at load, and 110 distinct materials is 110 things the renderer can't batch
+## together even though the rocks are visually near-identical - same failure
+## mode the buildings had before that pass (see CHANGELOG). Both are now
+## built once and shared: a single unit-radius mesh sized per-rock via node
+## scale, and a small fixed pool of materials so the shade variety survives
+## without the draw-call cost scaling with rock_count.
+static var _shared_rock_mesh: ArrayMesh = null
+static var _shared_rock_materials: Array[StandardMaterial3D] = []
+static var _shared_comet_mesh: SphereMesh = null
+static var _shared_comet_material: StandardMaterial3D = null
+
+static func _get_rock_mesh() -> ArrayMesh:
+	if _shared_rock_mesh == null:
+		var rock := SphereMesh.new()
+		rock.radius = 1.0
+		rock.height = 2.0
+		# Coarse and flat-shaded, matching the faceted planets.
+		rock.radial_segments = 6
+		rock.rings = 4
+		var st := SurfaceTool.new()
+		st.create_from(rock, 0)
+		st.deindex()
+		st.generate_normals()
+		_shared_rock_mesh = st.commit()
+	return _shared_rock_mesh
+
+static func _get_rock_material() -> StandardMaterial3D:
+	if _shared_rock_materials.is_empty():
+		for i in range(5):
+			var shade: float = lerp(0.6, 1.2, float(i) / 4.0)
+			var mat := StandardMaterial3D.new()
+			mat.albedo_color = Color(0.42 * shade, 0.37 * shade, 0.36 * shade)
+			mat.roughness = 1.0
+			_shared_rock_materials.append(mat)
+	return _shared_rock_materials[randi() % _shared_rock_materials.size()]
+
 func _ready() -> void:
 	# Layer 16: its own layer, so shots (mask 1|2|8) pass by but players still
 	# collide. Mask 1 keeps it colliding with planets and structures.
@@ -44,24 +83,11 @@ func _build() -> void:
 	add_child(_shape)
 
 	_mesh = MeshInstance3D.new()
-	var rock := SphereMesh.new()
-	rock.radius = radius
-	rock.height = radius * 2.0
-	# Coarse and flat-shaded, matching the faceted planets.
-	rock.radial_segments = 6
-	rock.rings = 4
-	var st := SurfaceTool.new()
-	st.create_from(rock, 0)
-	st.deindex()
-	st.generate_normals()
-	_mesh.mesh = st.commit()
-	var mat := StandardMaterial3D.new()
-	var shade: float = randf_range(0.6, 1.2)
-	mat.albedo_color = Color(0.42 * shade, 0.37 * shade, 0.36 * shade)
-	mat.roughness = 1.0
-	_mesh.material_override = mat
-	# Non-uniform scale so no two rocks are the same potato.
-	_mesh.scale = Vector3(1.0, randf_range(0.65, 1.3), randf_range(0.75, 1.2))
+	_mesh.mesh = _get_rock_mesh()
+	_mesh.material_override = _get_rock_material()
+	# Radius and the non-uniform potato stretch both fold into node scale now
+	# that the mesh itself is a shared unit sphere.
+	_mesh.scale = Vector3(radius, radius * randf_range(0.65, 1.3), radius * randf_range(0.75, 1.2))
 	add_child(_mesh)
 
 func launch(initial_velocity: Vector3) -> void:
@@ -102,6 +128,25 @@ func _update_comet() -> void:
 	else:
 		_extinguish_comet()
 
+static func _get_comet_puff() -> SphereMesh:
+	if _shared_comet_mesh == null:
+		_shared_comet_mesh = SphereMesh.new()
+		_shared_comet_mesh.radial_segments = 6
+		_shared_comet_mesh.rings = 3
+		_shared_comet_material = StandardMaterial3D.new()
+		_shared_comet_material.albedo_color = Color(1.0, 0.5, 0.12, 0.85)
+		_shared_comet_material.emission_enabled = true
+		_shared_comet_material.emission = Color(1.0, 0.62, 0.2)
+		_shared_comet_material.emission_energy_multiplier = 3.5
+		_shared_comet_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_shared_comet_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_shared_comet_mesh.material = _shared_comet_material
+	return _shared_comet_mesh
+
+## A rock can ignite/extinguish repeatedly as it grazes past a planet without
+## ever actually hitting it, so this (and the particle mesh/material above)
+## stays shared and rebuilt from radius-relative scale rather than allocating
+## fresh resources per ignition.
 func _ignite_comet() -> void:
 	_comet = GPUParticles3D.new()
 	add_child(_comet)
@@ -115,18 +160,7 @@ func _ignite_comet() -> void:
 	mat.scale_max = radius * 2.2
 	mat.color = Color(1.0, 0.62, 0.18, 0.9)
 	_comet.process_material = mat
-	var puff := SphereMesh.new()
-	puff.radial_segments = 6
-	puff.rings = 3
-	var puff_mat := StandardMaterial3D.new()
-	puff_mat.albedo_color = Color(1.0, 0.5, 0.12, 0.85)
-	puff_mat.emission_enabled = true
-	puff_mat.emission = Color(1.0, 0.62, 0.2)
-	puff_mat.emission_energy_multiplier = 3.5
-	puff_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	puff_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	puff.material = puff_mat
-	_comet.draw_pass_1 = puff
+	_comet.draw_pass_1 = _get_comet_puff()
 	_comet.amount = 120
 	_comet.lifetime = 1.4
 	_comet.local_coords = false

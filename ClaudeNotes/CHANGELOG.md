@@ -7,6 +7,117 @@ in [`tests/`](../tests) — see **Test harness** at the bottom.
 
 ---
 
+## 2026-08-12 — Session 8: bug/feature sweep #2 (gravity, asteroid batching, orbit ring spin, buster self-hit, bump map, atmosphere scope, sound gain)
+
+Not yet run through the headless probes in this environment (no Godot binary
+available here) - review before trusting the "verified" bar the rest of this
+log holds itself to.
+
+### Improvement: slugs pulled harder by gravity in open space
+`space_gravity_multiplier` (extra gravity felt above `space_altitude`, so a
+slug fired across open space arcs into whichever planet it passes rather than
+flying a straight line past it) raised from 3.4 to 6.5 - at the old value a
+slug still crossed most of a planet's influence radius on a nearly flat path.
+[scripts/weapons/Slug.gd](../scripts/weapons/Slug.gd)
+
+### Improvement: Asteroid draw calls
+Same failure mode Session 6 found and fixed in buildings: every one of the
+~110 rocks in the debris field baked its own SphereMesh (SurfaceTool +
+deindex + generate_normals, at spawn) *and* got its own unique
+StandardMaterial3D, so nothing the renderer draws could batch even though the
+rocks are visually near-identical. Both are now built once (a shared
+unit-radius mesh, sized per-rock via node scale; a small fixed pool of 5
+materials for shade variety) and reused - draw calls no longer scale with
+`rock_count`, and 110 redundant SurfaceTool bakes at DebrisField spawn become
+1. Same treatment applied to the comet-trail puff mesh/material an incoming
+rock ignites, since a busy match can have several lit at once.
+[scripts/world/Asteroid.gd](../scripts/world/Asteroid.gd)
+
+### Bug: orbit rings detaching from spinning parents
+Root cause of the still-broken ring from Session 7's partial fix: a moon's
+ring is parented to its parent planet (orbit_pivot) so its *position* tracks
+the parent for free - but plain node parenting also inherits the parent's
+*rotation*, and every planet spins on its own axis (`spin_speed`). The ring's
+drawn orientation was only ever set on an infrequent radius/axis-change
+refresh, so between refreshes it silently tumbled along with its parent's
+spin, drifting away from the moon's actual orbital plane within seconds -
+reads as the ring "detaching." Added `_orient_orbit_ring()`, which
+counter-rotates the ring's local transform by the pivot's current spin every
+single physics frame (cheap: one Basis inverse-multiply), so its *world*
+orientation stays locked to `orbit_axis` regardless of what the pivot is
+doing. `_refresh_orbit_ring()` now only resizes the torus and records the
+target axis; orientation is entirely this function's job.
+[scripts/world/OrbitalBody.gd](../scripts/world/OrbitalBody.gd)
+
+### Bug: Planet Buster shell exploding on its own shooter
+The shell leaves the barrel at a deliberately slow 7 m/s and (unlike other
+projectiles) doesn't inherit the shooter's velocity. A player moving forward
+at even a modest clip in open space - Space Board flight, boundary-launch
+momentum, a recent rocket-jump - easily outpaces that and drifts back into
+the shell within the first frame or two. `Projectile._on_hit()` has no owner
+check, so that self-touch read as a stray hit: harmless splash, `queue_free()`
+- the shell vanished having never reached the locked planet, with no
+indication of what happened. `PlanetBusterProjectile.launch()` now calls
+`add_collision_exception_with(shooter)` so the shell can't collide with its
+own shooter for its whole flight, not just the first few frames the way other
+weapons get away with via muzzle clearance alone.
+[scripts/weapons/PlanetBusterProjectile.gd](../scripts/weapons/PlanetBusterProjectile.gd)
+
+### New: triangular bump-map pattern on planet surfaces
+Procedurally generated, not an asset - a 96x96 normal map baked once (three
+periodic triangle-wave bands along u, v, and u+v summed into a tileable
+triangular lattice height field, then differentiated into a normal via
+central-difference gradients, the same technique any terrain normal map
+uses) and shared across every planet's material, tiled ~26x across each
+body's UV via `uv1_scale`. `normal_scale` kept low (0.35) so it reads as a
+subtle engraved hull-plating texture on top of the existing low-poly facets,
+not a rock texture fighting the faceted silhouette. Applied to both the
+default per-planet material and to spawned moon-fragment materials (which
+replace, and so need to reapply the pattern onto, whatever `_ready()` set up
+before the fragment's own color was known).
+[scripts/world/OrbitalBody.gd](../scripts/world/OrbitalBody.gd)
+
+### Bug: atmosphere glow flickering with no relation to the viewer
+Session 7 scoped the atmosphere-hide check to "any player" (`get_frame_body()
+== self` checked against every node in the `players` group). With bots
+scattered across a dozen planets, a given world's glow flickered on and off
+as whichever bots happened to be near it wandered in and out of range - from
+the person actually watching, that reads as "shows up inconsistently
+regardless of what planet you're near," since it had nothing to do with their
+own position. Every `OrbitalBody` exists independently in each client's own
+scene tree, so there's no correctness reason this needs to be shared state -
+rescoped to the single local viewer (`Player.is_first_person_view()`), found
+once per physics frame and cached statically so a dozen-plus planets share
+one group scan instead of each repeating it.
+[scripts/world/OrbitalBody.gd](../scripts/world/OrbitalBody.gd)
+
+### Quality control pass: sound effect gain staging
+`_pack()` already soft-clips each sound's own synthesised waveform before it
+ever becomes an `AudioStreamWAV`, but that happens *before* the per-play
+`volume_db` boost several call sites ask for - a soft-clipped signal already
+sitting near 0.7-0.8 full scale, boosted several dB more at playback, clips
+hard at the output stage regardless. Worst offender was `planet_shatter` at
++10 dB (~3.16x linear) on what should be the single loudest, most important
+sound in the game - almost guaranteed to distort into noise instead of
+landing as a clean boom. Trimmed the outliers (planet_shatter +10→+3,
+explosion +6→+3, collapse +6→+2.5, buster_fire +4→+3, railgun_fire's
+charge-scaled ceiling +2→+1, land's impact-scaled ceiling +2→0), keeping the
+same relative loudness ordering (biggest moments still loudest) with actual
+headroom underneath it. Also added an `AudioEffectLimiter` (ceiling -0.3 dB)
+to the Master bus as a standing safety net - catches overlapping loud voices
+in a firefight and any future sound whose gain wasn't hand-checked against
+this same math, rather than relying on getting every volume_db exactly right
+by feel.
+[scripts/autoload/Sfx.gd](../scripts/autoload/Sfx.gd),
+[scripts/world/OrbitalBody.gd](../scripts/world/OrbitalBody.gd),
+[scripts/weapons/Rocket.gd](../scripts/weapons/Rocket.gd),
+[scripts/world/Building.gd](../scripts/world/Building.gd),
+[scripts/weapons/PlanetBuster.gd](../scripts/weapons/PlanetBuster.gd),
+[scripts/weapons/Railgun.gd](../scripts/weapons/Railgun.gd),
+[scripts/player/Player.gd](../scripts/player/Player.gd)
+
+---
+
 ## 2026-08-12 — Session 7: bug/feature sweep (scope, atmosphere, sound, kill credit, planet collision, orbit rings)
 
 Not yet run through the headless probes in this environment (no Godot binary

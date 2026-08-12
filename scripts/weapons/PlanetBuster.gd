@@ -85,7 +85,8 @@ func _do_fire(muzzle_transform: Transform3D, aim_direction: Vector3) -> void:
 	shell.global_position = muzzle_transform.origin
 	shell.lock_target = _lock_target
 	shell.launch(aim_direction * shell_speed, owner_player)
-	Sfx.play_3d("buster_fire", muzzle_transform.origin, 1.0, 4.0, 0.05)
+	# Trimmed from +4 - see OrbitalBody.shatter()'s planet_shatter call for why.
+	Sfx.play_3d("buster_fire", muzzle_transform.origin, 1.0, 3.0, 0.05)
 	_lock_target = null
 	_lock_progress = 0.0
 

@@ -24,8 +24,12 @@ enum State { FLYING, SLITHERING }
 @export var slither_speed: float = 11.0
 ## Extra gravity felt while flying above `space_altitude`. A slug fired between
 ## planets should visibly fall into whichever well it passes, arcing around it,
-## rather than sailing past on a nearly straight line.
-@export var space_gravity_multiplier: float = 3.4
+## rather than sailing past on a nearly straight line. Bumped from 3.4: at the
+## old value a slug fired across open space still crossed most planets'
+## influence radius on a nearly flat line and sailed past into the void -
+## the extra pull needed to be strong enough to actually bend that into a
+## planet-finding arc, not just a cosmetic wobble.
+@export var space_gravity_multiplier: float = 6.5
 @export var space_altitude: float = 15.0
 @export var max_hp: float = 25.0  ## slugs can be shot and killed mid-flight
 

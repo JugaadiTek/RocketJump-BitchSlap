@@ -89,7 +89,9 @@ func _ready() -> void:
 	mesh.mesh = mesh.mesh.duplicate()
 	var mat: Material = mesh.get_surface_override_material(0)
 	if mat:
-		mesh.set_surface_override_material(0, mat.duplicate())
+		mat = mat.duplicate()
+		mesh.set_surface_override_material(0, mat)
+		_apply_bump_pattern(mat)
 	collision.shape = collision.shape.duplicate()
 
 	add_to_group("orbital_bodies")
@@ -155,7 +157,10 @@ func _add_orbit_ring() -> void:
 	_refresh_orbit_ring()
 
 ## TorusMesh lies in its own XZ plane with +Y as the axis, so aligning the ring
-## to the orbit is just a matter of pointing its Y at orbit_axis.
+## to the orbit is just a matter of pointing its Y at orbit_axis. Only resizes
+## the torus and records the target axis here - the actual transform is set
+## every physics frame by _orient_orbit_ring(), since the ring's parent (the
+## pivot) can itself be spinning.
 func _refresh_orbit_ring() -> void:
 	if _orbit_ring == null or not is_instance_valid(_orbit_ring):
 		return
@@ -163,10 +168,84 @@ func _refresh_orbit_ring() -> void:
 	var thickness: float = clampf(orbit_radius * 0.0025, 0.12, 0.6)
 	ring.inner_radius = maxf(orbit_radius - thickness, 0.01)
 	ring.outer_radius = orbit_radius + thickness
-	var axis: Vector3 = orbit_axis.normalized()
-	_orbit_ring.transform = Transform3D(Basis(Quaternion(Vector3.UP, axis)), Vector3.ZERO)
 	_ring_drawn_radius = orbit_radius
-	_ring_drawn_axis = axis
+	_ring_drawn_axis = orbit_axis.normalized()
+	_orient_orbit_ring()
+
+## Keeps the ring's WORLD orientation locked to the orbital plane every frame,
+## independent of the pivot's own spin. The ring is parented to orbit_pivot so
+## its POSITION follows the pivot for free (moons need their ring to travel
+## with the parent planet as it circles the binary) - but plain parenting also
+## inherits the pivot's ROTATION, and planets spin on their own axis. Without
+## this correction a moon's ring would visibly tumble in lockstep with its
+## parent's spin instead of staying fixed to the plane the moon actually
+## orbits in, drifting out of alignment ("detaching") within a few seconds.
+func _orient_orbit_ring() -> void:
+	if _orbit_ring == null or not is_instance_valid(_orbit_ring) or orbit_pivot == null:
+		return
+	var world_basis: Basis = Basis(Quaternion(Vector3.UP, _ring_drawn_axis))
+	_orbit_ring.transform = Transform3D(orbit_pivot.global_transform.basis.inverse() * world_basis, Vector3.ZERO)
+
+## Baked once and shared by every planet's material (see Asteroid.gd for why
+## sharing a generated resource across near-identical instances matters) -
+## only the tiny 96x96 tile is ever built, however many planets use it.
+const BUMP_TILE_SIZE: int = 96
+## How many times the tile repeats across a planet's UV. A flat count rather
+## than one scaled per-radius, so a 44m world and a 5m pebble read as the same
+## hull plating at different zoom rather than the pattern changing scale.
+const BUMP_TILE_REPEAT: float = 26.0
+static var _bump_texture: ImageTexture = null
+
+## Applies the shared triangular bump pattern to a (per-instance, already
+## duplicated) surface material as a subtle normal map - the low-poly facets
+## stay the silhouette, this just engraves a fine plating texture on top of
+## them without touching geometry.
+func _apply_bump_pattern(mat: Material) -> void:
+	if not (mat is StandardMaterial3D):
+		return
+	var std_mat: StandardMaterial3D = mat as StandardMaterial3D
+	std_mat.normal_enabled = true
+	std_mat.normal_texture = _get_bump_texture()
+	std_mat.normal_scale = 0.35  ## subtle - an engraving, not a rock texture
+	std_mat.uv1_scale = Vector3(BUMP_TILE_REPEAT, BUMP_TILE_REPEAT, 1.0)
+
+static func _get_bump_texture() -> ImageTexture:
+	if _bump_texture == null:
+		_bump_texture = _build_bump_texture()
+	return _bump_texture
+
+## Renders a tileable triangular lattice into a normal map. The lattice is
+## three families of parallel bands along u, v, and u+v - the classic way to
+## draw a triangular grid, and exactly periodic in both u and v for any
+## integer frequency, so the tile wraps with no seam when uv1_scale repeats
+## it. Each band is a repeating triangle wave (tent function); summing the
+## three gives a height field with a triangular cell structure, which is then
+## differentiated into a normal via central-difference gradients - the same
+## "height field to normal" trick any terrain normal map uses.
+static func _build_bump_texture() -> ImageTexture:
+	var size: int = BUMP_TILE_SIZE
+	var freq: float = 6.0
+	var strength: float = 1.4
+	var texel: float = 1.0 / float(size)
+	var img := Image.create(size, size, false, Image.FORMAT_RGB8)
+	for y in range(size):
+		for x in range(size):
+			var u: float = float(x) / float(size)
+			var v: float = float(y) / float(size)
+			var h0: float = _bump_height(u, v, freq)
+			var dx: float = (_bump_height(u + texel, v, freq) - h0) * strength
+			var dy: float = (_bump_height(u, v + texel, freq) - h0) * strength
+			var n: Vector3 = Vector3(-dx, -dy, 1.0).normalized()
+			img.set_pixel(x, y, Color(n.x * 0.5 + 0.5, n.y * 0.5 + 0.5, n.z * 0.5 + 0.5))
+	return ImageTexture.create_from_image(img)
+
+static func _bump_height(u: float, v: float, freq: float) -> float:
+	return _tri_wave(u * freq) + _tri_wave(v * freq) + _tri_wave((u + v) * freq)
+
+## Repeating tent function, period 1: 0 at integers, 1 at half-integers.
+static func _tri_wave(x: float) -> float:
+	var f: float = fposmod(x, 1.0)
+	return absf(f * 2.0 - 1.0)
 
 ## Thin emissive shell just above the surface, rendered inside-out so only the
 ## limb shows through - the atmospheric rim glow every planet has in the concept
@@ -193,21 +272,49 @@ func _add_atmosphere_shell() -> void:
 	add_child(_atmosphere)
 	_resize_atmosphere()
 
-## Hides the rim glow while anyone is actually standing on this body. From
-## orbit the shell reads as atmosphere; from the surface, with the camera
-## sitting inside/just past it, it's just a bright haze in your face. "On the
-## body" reuses Player's own planet-frame check (get_frame_body()) rather than
-## a second distance threshold, so the glow disappears exactly when the
-## player's movement frame switches to this planet.
+## Hides the rim glow while the person actually looking at this screen is
+## standing on this body. From orbit the shell reads as atmosphere; from the
+## surface, with the camera sitting inside/just past it, it's just a bright
+## haze in the way. "On the body" reuses Player's own planet-frame check
+## (get_frame_body()) rather than a second distance threshold, so the glow
+## disappears exactly when the local player's movement frame switches to
+## this planet.
+##
+## Scoped to the LOCAL viewer specifically, not "any player" - this used to
+## check every node in the "players" group, so with bots scattered across a
+## dozen planets a given world's glow flickered on and off as whichever bots
+## happened to be near it wandered in and out of range, with no relation to
+## where the person watching actually was. Every OrbitalBody exists
+## independently in each client's own scene tree, so there's nothing wrong
+## with each client deciding this purely from its own local player - it's a
+## rendering nicety, not shared gameplay state.
 func _update_atmosphere_visibility() -> void:
 	if _atmosphere == null:
 		return
-	var occupied: bool = false
-	for player in get_tree().get_nodes_in_group("players"):
-		if is_instance_valid(player) and player.has_method("get_frame_body") and player.get_frame_body() == self:
-			occupied = true
-			break
-	_atmosphere.visible = not occupied
+	var viewer: Player = _find_local_viewer()
+	_atmosphere.visible = not (viewer != null and viewer.get_frame_body() == self)
+
+## The local viewer is the same for every body in a given physics frame, so
+## the group scan runs once per frame (cached statically) instead of once per
+## body - with a dozen-plus planets all calling this, repeating the scan per
+## body would be the same O(bodies x players) cost the atmosphere check used
+## to have, just moved rather than fixed.
+static var _local_viewer: Player = null
+static var _local_viewer_frame: int = -1
+
+static func _find_local_viewer() -> Player:
+	var frame: int = Engine.get_physics_frames()
+	if frame == _local_viewer_frame:
+		return _local_viewer
+	_local_viewer_frame = frame
+	_local_viewer = null
+	var tree: SceneTree = Engine.get_main_loop() as SceneTree
+	if tree:
+		for player in tree.get_nodes_in_group("players"):
+			if is_instance_valid(player) and player is Player and (player as Player).is_first_person_view():
+				_local_viewer = player
+				break
+	return _local_viewer
 
 func _resize_atmosphere() -> void:
 	var shell_mesh: SphereMesh = _atmosphere.mesh
@@ -343,12 +450,18 @@ func _physics_process(delta: float) -> void:
 	if collision_cooldown > 0.0:
 		collision_cooldown -= delta
 	# Orbits drift on every spawn landing and jump/tilt on a structural
-	# collision; refresh the drawn ring once either the radius or the plane
-	# has moved enough to actually be visible. Axis alone (a tilt with radius
-	# unchanged) used to leave a stale ring, since only radius was watched.
+	# collision; refresh the drawn ring's SIZE once either the radius or the
+	# plane has moved enough to actually be visible. Axis alone (a tilt with
+	# radius unchanged) used to leave a stale ring, since only radius was
+	# watched.
 	if _orbit_ring and (absf(orbit_radius - _ring_drawn_radius) > maxf(orbit_radius * 0.01, 0.25)
 			or orbit_axis.normalized().dot(_ring_drawn_axis) < 0.9999):
 		_refresh_orbit_ring()
+	# Independent of the above: the ring's ORIENTATION has to be corrected
+	# every single frame, not just on a size/axis change, because the pivot
+	# it's parented to may be spinning on its own axis right now even when
+	# nothing about the orbit itself has changed.
+	_orient_orbit_ring()
 	if _collider_dirty:
 		_collider_rebuild_delay -= delta
 		if _collider_rebuild_delay <= 0.0:
@@ -483,8 +596,11 @@ func shatter(blast_radius: float, blast_damage: float, instigator: Node = null, 
 	if is_shattered:
 		return
 	is_shattered = true
-	# Scaled by size: a moon cracks, a 44m world detonates.
-	Sfx.play_3d("planet_shatter", global_position, clampf(30.0 / maxf(radius, 1.0), 0.45, 1.6), 10.0, 0.05)
+	# Scaled by size: a moon cracks, a 44m world detonates. volume_db trimmed
+	# from the original +10 - a boost that hot on top of an already
+	# near-full-scale synthesised waveform clipped hard at output; +3 is still
+	# the loudest thing in the game without distorting into noise.
+	Sfx.play_3d("planet_shatter", global_position, clampf(30.0 / maxf(radius, 1.0), 0.45, 1.6), 3.0, 0.05)
 	shattered.emit(self)
 	static_body.set_collision_layer_value(1, false)
 	static_body.set_collision_mask_value(1, false)
@@ -532,6 +648,10 @@ func _spawn_moon_fragments() -> void:
 			var frag_mat := StandardMaterial3D.new()
 			frag_mat.albedo_color = base_color
 			frag_mesh.set_surface_override_material(0, frag_mat)
+			# This replaces the material _ready() already bump-mapped (before
+			# radius/color were known), so the fragment needs the pattern
+			# applied again on its new one or it'd be the one bare planet.
+			frag._apply_bump_pattern(frag_mat)
 		# Pick a target parent body to orbit
 		var host: OrbitalBody = _pick_fragment_host(bodies, frag.radius)
 		if host == null:

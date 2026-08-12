@@ -98,9 +98,10 @@ func _release_fire(muzzle_transform: Transform3D, aim_direction: Vector3) -> voi
 	var shot_damage: float = lerp(min_damage, max_damage, charge)
 	var valid: bool = charge >= (min_charge_time / charge_max_time)
 	_cooldown_remaining = fire_cooldown
-	# Louder and deeper the harder it was charged.
+	# Louder and deeper the harder it was charged. Ceiling trimmed from +2 to
+	# +1 - see OrbitalBody.shatter()'s planet_shatter call for why.
 	Sfx.play_3d("railgun_fire", muzzle_transform.origin, 1.25 - charge * 0.35,
-		-6.0 + charge * 8.0)
+		-6.0 + charge * 7.0)
 	charge = 0.0
 	_do_fire_with_damage(muzzle_transform, aim_direction, shot_damage, valid)
 	fired.emit()
