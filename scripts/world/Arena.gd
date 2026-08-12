@@ -339,19 +339,17 @@ func _build_buildings() -> void:
 			# is exactly why towers used to come out a fixed 30m tall instead
 			# of matching their planet.
 			if building is Tower:
-				# Always the planet's own circumference (TAU * radius) -
-				# consistently, not just as the rare top end of a random
-				# range: a tower tall enough to wrap all the way round the
-				# world if laid on its side, every time. height_budget is
-				# only ever trimmed below that for a body locked in a
-				# PERMANENTLY fixed separation from a neighbour (the central
-				# binary, a moon and its own parent - see
-				# _solve_structure_heights()); respecting that trim in those
-				# specific cases is what keeps two towers that can never drift
-				# apart from grinding into each other forever. Every other
-				# body's budget is untouched (== body.radius) and gets the
-				# full circumference.
-				var target_height: float = TAU * body.radius
+				# Always the planet's own diameter (2 * radius) - a tower as
+				# tall as the world is wide, consistently, every tower, every
+				# planet. height_budget is only ever trimmed below that for a
+				# body locked in a PERMANENTLY fixed separation from a
+				# neighbour (the central binary, a moon and its own parent -
+				# see _solve_structure_heights()); respecting that trim in
+				# those specific cases is what keeps two towers that can
+				# never drift apart from grinding into each other forever.
+				# Every other body's budget is untouched (== body.radius) and
+				# gets the full diameter.
+				var target_height: float = 2.0 * body.radius
 				building.tower_height = target_height if height_budget >= body.radius else minf(target_height, height_budget)
 				building.floor_count = maxi(2, int(building.tower_height / 9.0))
 				building.tower_width = clampf(body.radius * 0.28, 6.0, 11.0)

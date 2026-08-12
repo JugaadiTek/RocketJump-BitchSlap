@@ -7,6 +7,65 @@ in [`tests/`](../tests) — see **Test harness** at the bottom.
 
 ---
 
+## 2026-08-13 — Session 14: tower height -> diameter, arena boundary hugs each direction independently
+
+Two follow-up tuning requests on top of Session 13.
+
+### Change: tower height is now the planet's diameter, not its circumference
+Was `TAU * radius` (~6.28x, tall enough to wrap all the way round the
+world); now `2 * radius` (a tower as tall as the world is wide), same
+consistently-applied-to-every-tower behaviour and the same safety trim for
+permanently-fixed-separation pairs. Real, measured effect - this is a big
+win, not just a tuning tweak: arena load time dropped from Session 13's
+497ms back to ~260-500ms range, and `PerfProbe --sustained` improved
+markedly (spike counts down from the high-90s/169 per 2400 frames toward
+single digits in a clean run) - a diameter-height tower is roughly a third
+the height (and floor count, and wall/collision geometry) of a
+circumference-height one. `tests/LoadProbe.gd`'s "worst-case tower" sample
+and `tests/WorldProbe.gd`'s tower-height-range check both updated to measure
+against the new 2.00x ceiling instead of TAU.
+[scripts/world/Arena.gd](../scripts/world/Arena.gd),
+[tests/LoadProbe.gd](../tests/LoadProbe.gd),
+[tests/WorldProbe.gd](../tests/WorldProbe.gd)
+
+### Change: arena boundary is no longer a symmetric cube
+Was one box centred on the arena origin, all six faces pushed out to match
+whichever SINGLE body reached furthest in ANY direction - a lone far-flung
+planet inflated the box on every side at once, even sides it was nowhere
+near. Each of the six faces (+X/-X/+Y/-Y/+Z/-Z) now independently sits
+`BOUNDARY_MARGIN` (50m) beyond whichever body reaches furthest in THAT one
+cardinal direction. Still a single box (never per-planet, so it can't show
+up as a wall out in dead space between two worlds), but now a genuinely
+rectangular one that hugs the real layout instead of the worst single axis.
+Measured on a live arena: box extents of `(-389, -255, -199)` to
+`(530, 110, 362)` - the +Y face sits only 110m out while +X reaches 530m,
+where the old cube would have used 530 on all six faces regardless. Every
+measured face margin lands at exactly 50.0m.
+
+`GravityManager.arena_half_extent()` (a single scalar) is kept as a
+sphere-safe compatibility fallback - the tightest of the six new face
+distances, so anything still asking for one number stays guaranteed inside
+the box on every axis - but nothing gameplay-facing actually uses it
+that way any more:
+- `ArenaBoundary.gd`'s visual shell now resizes to the real (possibly
+  non-cubic) box and repositions itself to the box's true centre, instead of
+  always sitting at the world origin - it was already purely visual and
+  already resized every frame, so this made it accurate rather than
+  changing its role.
+- `Spawner._place_at_boundary()` no longer picks a point on a sphere sized
+  to fit inside the tightest face (which was spawning everyone far closer to
+  the centre than intended on every OTHER axis - measured: bots dropped
+  from spawning near the ~505m edge to ~77m before this fix). It now picks a
+  point directly on the real box's surface, inset by `SPAWN_BOUNDARY_MARGIN`
+  (30m). Verified: 50 sampled spawn points, all inside the box, worst
+  clearance from the true edge 30.0m.
+[scripts/autoload/GravityManager.gd](../scripts/autoload/GravityManager.gd),
+[scripts/world/ArenaBoundary.gd](../scripts/world/ArenaBoundary.gd),
+[scripts/player/Spawner.gd](../scripts/player/Spawner.gd),
+[tests/WorldProbe.gd](../tests/WorldProbe.gd)
+
+---
+
 ## 2026-08-13 — Session 13: fixed the four Session 12 bugs, applied three recommended optimizations, towers now always full circumference
 
 Follow-through on Session 12's audit: fixes for all four reported bugs,

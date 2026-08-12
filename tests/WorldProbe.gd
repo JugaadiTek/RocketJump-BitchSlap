@@ -395,15 +395,14 @@ func _test_decor() -> void:
 		rings, shells, rocks, faceted])
 
 ## NEW - Arena._build_buildings() now sets every tower_height to its planet's
-## own full circumference (TAU*radius) consistently, instead of the old fixed
-## cap AT radius - so this should now read very close to TAU for every body
-## whose height_budget allows it (below TAU only for the specific
-## permanently-fixed-separation pairs _solve_structure_heights() trims).
-## Reports the observed range against that ceiling, then specifically re-runs
-## the hollow-interior and ladder-climb-to-peak checks against the TALLEST
-## tower generated (not just "the first tower found", which the checks above
-## use) - more floors and a longer shaft is exactly the case most likely to
-## expose something the original fixed ~30m towers never could.
+## own diameter (2*radius) consistently - so this should read very close to
+## 2.00x for every body whose height_budget allows it (below 2.00x only for
+## the specific permanently-fixed-separation pairs _solve_structure_heights()
+## trims). Reports the observed range against that ceiling, then specifically
+## re-runs the hollow-interior and ladder-climb-to-peak checks against the
+## TALLEST tower generated (not just "the first tower found", which the
+## checks above use) - more floors and a longer shaft is exactly the case
+## most likely to expose something the original fixed ~30m towers never could.
 func _test_tower_height_range() -> void:
 	var count: int = 0
 	var min_ratio: float = INF
@@ -419,7 +418,7 @@ func _test_tower_height_range() -> void:
 			var ratio: float = child.tower_height / body.radius
 			min_ratio = minf(min_ratio, ratio)
 			max_ratio = maxf(max_ratio, ratio)
-			if child.tower_height > TAU * body.radius + 0.01:
+			if child.tower_height > 2.0 * body.radius + 0.01:
 				over_ceiling += 1
 			if tallest == null or child.tower_height > tallest.tower_height:
 				tallest = child
@@ -427,8 +426,8 @@ func _test_tower_height_range() -> void:
 	if count == 0:
 		_log("TOWERHEIGHT no towers found")
 		return
-	_log("TOWERHEIGHT %d towers; height/radius ratio observed %.2fx-%.2fx (ceiling is TAU=%.2fx); %d exceed the ceiling; tallest=%.0fm on %s (r%.0f)" % [
-		count, min_ratio, max_ratio, TAU, over_ceiling, tallest.tower_height, tallest_host.name, tallest_host.radius])
+	_log("TOWERHEIGHT %d towers; height/radius ratio observed %.2fx-%.2fx (ceiling is diameter=2.00x); %d exceed the ceiling; tallest=%.0fm on %s (r%.0f)" % [
+		count, min_ratio, max_ratio, over_ceiling, tallest.tower_height, tallest_host.name, tallest_host.radius])
 	if tallest == null:
 		return
 
@@ -570,19 +569,52 @@ func _test_planet_shader() -> void:
 	_log("PLANETSHADER shattered %s: %d fragments spawned, %d with a real (non-black/non-bare) ShaderMaterial colour" % [
 		target.name, frag_seen.size(), frag_ok])
 
-## NEW - a very tall randomised tower on the outermost planet directly
-## inflates GravityManager.arena_half_extent() (structure_reach feeds it).
-## Spawner._spawn_radius() (fixed bug: this used to be a hard-coded constant,
-## SPAWN_RADIUS, chosen once "just inside ARENA_BOUNDARY_RADIUS, clear of
-## Halcyon" - it didn't adapt when the box grew past it) should now track the
-## live boundary with a fixed margin, never spawning near or outside its edge
-## regardless of how far a tower's structure_reach pushes it out.
+## NEW - the arena boundary is no longer a symmetric cube: each of the six
+## faces independently sits GravityManager.BOUNDARY_MARGIN (50m) beyond
+## whichever body reaches furthest in THAT cardinal direction, not beyond
+## whatever single body reaches furthest overall. Confirms each face's
+## measured margin actually lands at ~50m (not drifting, not collapsed to 0
+## or negative), and that Spawner._random_boundary_point() - which now picks
+## a point on the real (asymmetric) box surface instead of a sphere sized to
+## the tightest face - lands inside SPAWN_BOUNDARY_MARGIN of the true edge
+## on every sampled point, not just on the tightest axis.
 func _test_boundary_vs_spawn() -> void:
-	var extent: float = GravityManager.arena_half_extent()
-	var spawn_radius: float = SpawnerScript._spawn_radius()
-	var margin: float = extent - spawn_radius
-	_log("BOUNDARYSPAWN arena_half_extent=%.0fm, spawn_radius=%.0fm, margin=%.0fm -> spawn point is %s the flexing boundary box (margin should track SPAWN_BOUNDARY_MARGIN=%.0f, not drift toward 0)" % [
-		extent, spawn_radius, margin, "INSIDE" if spawn_radius < extent else "OUTSIDE/AT THE EDGE OF", SpawnerScript.SPAWN_BOUNDARY_MARGIN])
+	var bmin: Vector3 = GravityManager.arena_bounds_min()
+	var bmax: Vector3 = GravityManager.arena_bounds_max()
+	var reach_max := Vector3.ZERO
+	var reach_min := Vector3.ZERO
+	for body in GravityManager.get_bodies():
+		if body.is_shattered:
+			continue
+		var reach: float = body.radius + body.structure_reach
+		var p: Vector3 = body.global_position
+		reach_max.x = maxf(reach_max.x, p.x + reach)
+		reach_max.y = maxf(reach_max.y, p.y + reach)
+		reach_max.z = maxf(reach_max.z, p.z + reach)
+		reach_min.x = minf(reach_min.x, p.x - reach)
+		reach_min.y = minf(reach_min.y, p.y - reach)
+		reach_min.z = minf(reach_min.z, p.z - reach)
+	var margins: Array[float] = [
+		bmax.x - reach_max.x, reach_min.x - bmin.x,
+		bmax.y - reach_max.y, reach_min.y - bmin.y,
+		bmax.z - reach_max.z, reach_min.z - bmin.z,
+	]
+	_log("BOUNDARYFACES per-face margin beyond the closest limiting body [+X -X +Y -Y +Z -Z] = [%s] (should all read ~%.0fm)" % [
+		", ".join(margins.map(func(m): return "%.1f" % m)), GravityManager.BOUNDARY_MARGIN])
+	_log("BOUNDARYFACES box min=%s max=%s (no longer symmetric/centred at origin)" % [bmin, bmax])
+
+	var samples: int = 50
+	var all_inside: bool = true
+	var worst_clearance: float = INF
+	for i in range(samples):
+		var p: Vector3 = SpawnerScript._random_boundary_point()
+		var inside: bool = (p.x <= bmax.x and p.x >= bmin.x and p.y <= bmax.y and p.y >= bmin.y and p.z <= bmax.z and p.z >= bmin.z)
+		if not inside:
+			all_inside = false
+		var clearance: float = minf(minf(bmax.x - p.x, p.x - bmin.x), minf(minf(bmax.y - p.y, p.y - bmin.y), minf(bmax.z - p.z, p.z - bmin.z)))
+		worst_clearance = minf(worst_clearance, clearance)
+	_log("BOUNDARYSPAWN %d sampled spawn points all inside the box=%s, worst clearance from the true edge=%.1fm (target ~%.0fm)" % [
+		samples, all_inside, worst_clearance, SpawnerScript.SPAWN_BOUNDARY_MARGIN])
 
 ## NEW - dying mid-ladder-climb never calls Ladder's own exit path
 ## (clear_ladder()), since the player is hidden/collision-stripped by

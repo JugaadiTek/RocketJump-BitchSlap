@@ -52,23 +52,25 @@ func _ready() -> void:
 	_log("BUILD   one tower=%.1fms  (13 buildings ~= %.0fms of load)" % [
 		(t5 - t4) / 1000.0, (t5 - t4) / 1000.0 * 13.0])
 
-	# Worst-case tower: Arena._build_buildings() now randomises tower_height
-	# up to TAU * body.radius (was capped at body.radius) - built here at that
-	# actual ceiling, on the biggest live planet, to price the top of the new
-	# range rather than only the old fixed 30m sample above.
+	# Tallest tower in the arena: Arena._build_buildings() now sets every
+	# tower_height to its own planet's diameter (2 * radius) - built here at
+	# that height, on the biggest live planet (which, since height scales
+	# with radius, is also the tallest tower any planet in this arena will
+	# ever get), to price the real cost every tower now pays rather than
+	# only the old fixed 30m sample above.
 	var biggest: OrbitalBody = null
 	for candidate in GravityManager.get_bodies():
 		if biggest == null or candidate.radius > biggest.radius:
 			biggest = candidate
-	var worst := Tower.new()
-	worst.tower_height = TAU * biggest.radius
-	worst.floor_count = maxi(2, int(worst.tower_height / 9.0))
-	worst.tower_width = clampf(biggest.radius * 0.28, 6.0, 11.0)
-	worst.host_radius = biggest.radius
+	var tallest := Tower.new()
+	tallest.tower_height = 2.0 * biggest.radius
+	tallest.floor_count = maxi(2, int(tallest.tower_height / 9.0))
+	tallest.tower_width = clampf(biggest.radius * 0.28, 6.0, 11.0)
+	tallest.host_radius = biggest.radius
 	var t6: int = Time.get_ticks_usec()
-	add_child(worst)
+	add_child(tallest)
 	var t7: int = Time.get_ticks_usec()
-	_log("BUILD   worst-case tower (TAU*r%.0f=%.0fm tall, %d floors, on %s) = %.1fms  (13 at this ceiling ~= %.0fms of load)" % [
-		biggest.radius, worst.tower_height, worst.floor_count, biggest.name,
+	_log("BUILD   tallest tower (2*r%.0f=%.0fm tall, %d floors, on %s) = %.1fms  (13 at this height ~= %.0fms of load)" % [
+		biggest.radius, tallest.tower_height, tallest.floor_count, biggest.name,
 		(t7 - t6) / 1000.0, (t7 - t6) / 1000.0 * 13.0])
 	get_tree().quit()

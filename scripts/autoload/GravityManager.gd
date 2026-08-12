@@ -125,46 +125,78 @@ func get_nearest_body(global_pos: Vector3) -> OrbitalBody:
 			nearest = body
 	return nearest
 
-## Half-extent (centre to face) of the SINGLE box that bounds the whole
-## arena, centred on the arena origin. Sized from whichever body currently
-## reaches furthest out - its distance from the arena centre plus its own
-## radius and however far its structures stick out - with BOUNDARY_MARGIN of
-## clearance beyond that. "Flexes": ejecting or shattering the outermost
-## planet shrinks the box on its own, and a body drifting outward on an
-## eccentric or perturbed orbit grows it, with no fixed size hard-coded
-## anywhere. There is only ever this one box - it does not follow individual
-## planets or shrink to wrap whichever one a player happens to be near, so it
-## never shows up as a wall in open space between two worlds.
+## The SINGLE box that bounds the whole arena, still just one box (not one
+## per planet - it never shows up as a wall in open space between two
+## worlds), but no longer a symmetric cube sized to whichever single body
+## reaches furthest out in ANY direction. Each of the six faces now sits
+## BOUNDARY_MARGIN beyond whichever body reaches furthest in THAT specific
+## cardinal direction (+X/-X/+Y/-Y/+Z/-Z) - i.e. every face independently
+## hugs the planet closest to defining it, instead of every face being
+## pushed out to match the single most extreme body in the whole arena. A
+## constellation with one far-flung outlier used to inflate the box on all
+## six sides at once; now only the sides that outlier actually reaches out
+## toward move.
 ##
-## Cached per physics frame: every player and every projectile calls this (via
-## is_within_boundary()) once each physics tick, plus the boundary shell once
-## per render frame. Nothing that feeds this changes except during a physics
-## step, so recomputing per-caller was pure waste - with 31 bots and a
-## handful of projectiles all doing their own O(bodies) scan every tick, that
-## waste was enough to show up as real frame-time spikes in a sustained
+## Cached per physics frame: every player and every projectile calls this
+## (via is_within_boundary()) once each physics tick, plus the boundary shell
+## once per render frame. Nothing that feeds this changes except during a
+## physics step, so recomputing per-caller was pure waste - with 31 bots and
+## a handful of projectiles all doing their own O(bodies) scan every tick,
+## that waste was enough to show up as real frame-time spikes in a sustained
 ## firefight (measured: dropped a "sustained" PerfProbe run from ~230/2400
 ## frames over 20ms back down to baseline, ~5/2400).
-var _cached_half_extent: float = 0.0
-var _half_extent_frame: int = -1
+var _cached_bounds_min: Vector3 = Vector3.ZERO
+var _cached_bounds_max: Vector3 = Vector3.ZERO
+var _bounds_frame: int = -1
 
-func arena_half_extent() -> float:
+func _update_bounds() -> void:
 	var frame: int = Engine.get_physics_frames()
-	if frame == _half_extent_frame:
-		return _cached_half_extent
-	_half_extent_frame = frame
-	var furthest: float = 0.0
+	if frame == _bounds_frame:
+		return
+	_bounds_frame = frame
+	var bmax := Vector3.ZERO
+	var bmin := Vector3.ZERO
 	for body in _bodies:
 		if not is_instance_valid(body) or body.is_shattered:
 			continue
-		var reach: float = body.global_position.length() + body.radius + body.structure_reach
-		furthest = maxf(furthest, reach)
-	_cached_half_extent = furthest + BOUNDARY_MARGIN
-	return _cached_half_extent
+		var reach: float = body.radius + body.structure_reach
+		var p: Vector3 = body.global_position
+		bmax.x = maxf(bmax.x, p.x + reach)
+		bmax.y = maxf(bmax.y, p.y + reach)
+		bmax.z = maxf(bmax.z, p.z + reach)
+		bmin.x = minf(bmin.x, p.x - reach)
+		bmin.y = minf(bmin.y, p.y - reach)
+		bmin.z = minf(bmin.z, p.z - reach)
+	_cached_bounds_max = bmax + Vector3.ONE * BOUNDARY_MARGIN
+	_cached_bounds_min = bmin - Vector3.ONE * BOUNDARY_MARGIN
 
-## True if `pos` is inside the single arena-wide box (see arena_half_extent).
+## The box's max corner (+X/+Y/+Z faces).
+func arena_bounds_max() -> Vector3:
+	_update_bounds()
+	return _cached_bounds_max
+
+## The box's min corner (-X/-Y/-Z faces).
+func arena_bounds_min() -> Vector3:
+	_update_bounds()
+	return _cached_bounds_min
+
+## Largest half-extent that's still guaranteed inside the box on EVERY axis -
+## the tightest of the six face distances. The box is asymmetric now, so
+## there's no single "the" half-extent; this is the safe scalar fallback for
+## callers that just want one sphere-safe number (e.g. Spawner's boundary-shell
+## spawn point), not a claim that every face is actually this close.
+func arena_half_extent() -> float:
+	_update_bounds()
+	return minf(
+		minf(_cached_bounds_max.x, -_cached_bounds_min.x),
+		minf(minf(_cached_bounds_max.y, -_cached_bounds_min.y), minf(_cached_bounds_max.z, -_cached_bounds_min.z)))
+
+## True if `pos` is inside the arena-wide box (see arena_bounds_min/max).
 func is_within_boundary(pos: Vector3) -> bool:
-	var half: float = arena_half_extent()
-	return absf(pos.x) <= half and absf(pos.y) <= half and absf(pos.z) <= half
+	_update_bounds()
+	return (pos.x >= _cached_bounds_min.x and pos.x <= _cached_bounds_max.x
+		and pos.y >= _cached_bounds_min.y and pos.y <= _cached_bounds_max.y
+		and pos.z >= _cached_bounds_min.z and pos.z <= _cached_bounds_max.z)
 
 ## The human sitting at this screen - the single Player with
 ## is_first_person_view() true, or null (offline bot-only matches, a

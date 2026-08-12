@@ -11,18 +11,14 @@ extends Node
 
 signal spawn_complete
 
-## Kept inside the LIVE arena boundary by this much, not a fixed distance from
-## a hard-coded planet reach. GravityManager.arena_half_extent() flexes with
-## whatever currently reaches furthest out (including a tower's own
-## structure_reach, which can now be several times a planet's radius) - a
-## fixed SPAWN_RADIUS chosen "clear of Halcyon" back when nothing reached
-## past ~476 stayed fixed at 505 even once a tall tower pushed the real
-## boundary out past 650, which put every spawn well inside the live play
-## area instead of at its edge.
+## Kept inside the LIVE arena boundary box by this much, not a fixed distance
+## from a hard-coded planet reach. GravityManager's bounds flex with whatever
+## currently reaches furthest out in each direction (including a tower's own
+## structure_reach) - a fixed SPAWN_RADIUS chosen "clear of Halcyon" back when
+## nothing reached past ~476 stayed fixed at 505 even once a tall tower
+## pushed the real boundary out past 650, which put every spawn well inside
+## the live play area instead of at its edge.
 const SPAWN_BOUNDARY_MARGIN: float = 30.0
-## Absolute floor so a tiny/collapsed arena can't produce a degenerate (or
-## negative) spawn radius.
-const MIN_SPAWN_RADIUS: float = 100.0
 ## Default seconds to pick a planet; the actual window comes from the spawning
 ## entity (Player.get_spawn_aim_window()), which bots shorten drastically.
 const AIM_WINDOW: float = 10.0
@@ -78,21 +74,33 @@ func start_spawn(p: Player) -> void:
 	_aim_window = p.get_spawn_aim_window()
 	_place_at_boundary()
 
-## Distance from the arena origin to spawn at: a point at this radius is
-## guaranteed inside GravityManager's box boundary (any point on a sphere of
-## radius R has every axis component <= R, so R <= half_extent keeps it
-## inside on every axis), staying SPAWN_BOUNDARY_MARGIN clear of the live edge
-## instead of a distance chosen once for whatever reached furthest out at the
-## time.
-static func _spawn_radius() -> float:
-	return maxf(GravityManager.arena_half_extent() - SPAWN_BOUNDARY_MARGIN, MIN_SPAWN_RADIUS)
+## A random point on the LIVE arena boundary box's surface, inset by
+## SPAWN_BOUNDARY_MARGIN so it stays clear of the true edge. The box is
+## asymmetric now - each of its six faces independently hugs whichever
+## planet reaches furthest in that one direction (see GravityManager) - so a
+## single sphere radius sized to fit inside the TIGHTEST face would spawn
+## everyone far closer to the centre than intended on every other axis.
+## Picks one axis to pin to a face (uniformly, not area-weighted - simple,
+## and every face is still comfortably large), then a random position across
+## the other two.
+static func _random_boundary_point() -> Vector3:
+	var inset := Vector3.ONE * SPAWN_BOUNDARY_MARGIN
+	var bmin: Vector3 = GravityManager.arena_bounds_min() + inset
+	var bmax: Vector3 = GravityManager.arena_bounds_max() - inset
+	var p := Vector3(
+		randf_range(minf(bmin.x, bmax.x), maxf(bmin.x, bmax.x)),
+		randf_range(minf(bmin.y, bmax.y), maxf(bmin.y, bmax.y)),
+		randf_range(minf(bmin.z, bmax.z), maxf(bmin.z, bmax.z)))
+	match randi() % 3:
+		0: p.x = bmax.x if randf() < 0.5 else bmin.x
+		1: p.y = bmax.y if randf() < 0.5 else bmin.y
+		_: p.z = bmax.z if randf() < 0.5 else bmin.z
+	return p
 
 func _place_at_boundary() -> void:
-	# Random point on boundary sphere
-	var rand_dir := Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)).normalized()
-	player.global_position = rand_dir * _spawn_radius()
+	player.global_position = _random_boundary_point()
 	# Face inward toward arena center
-	var inward: Vector3 = -rand_dir
+	var inward: Vector3 = (-player.global_position).normalized()
 	var ref: Vector3 = Vector3.RIGHT if abs(inward.dot(Vector3.RIGHT)) < 0.9 else Vector3.FORWARD
 	var bx: Vector3 = inward.cross(ref).normalized()
 	var bz: Vector3 = bx.cross(inward).normalized()
