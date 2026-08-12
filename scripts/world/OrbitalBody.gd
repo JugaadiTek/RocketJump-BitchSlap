@@ -4,6 +4,11 @@ extends Node3D
 signal shattered(body: OrbitalBody)
 signal fragment_spawned(fragment: OrbitalBody)
 
+## The hue-rotating, bump-mapped surface shader every planet's material uses -
+## see _apply_bump_pattern(). Needed here (not just in the .tscn) because
+## spawned moon fragments build their material from scratch in code.
+const PLANET_SURFACE_SHADER: Shader = preload("res://scenes/world/planet_surface.gdshader")
+
 @export_group("Shape")
 @export var radius: float = 40.0:
 	set(v):
@@ -213,54 +218,55 @@ const BUMP_TILE_REPEAT: float = 4.0
 static var _bump_texture: ImageTexture = null
 
 ## Applies the shared triangular bump pattern to a (per-instance, already
-## duplicated) surface material as a normal map - the low-poly facets stay
-## the silhouette, this engraves a larger triangular plating texture with
-## embossed edges on top of them without touching geometry. Also brings the
-## base material closer to the concept art's faceted-gem look: those facets
-## catch hard, distinct specular glints rather than reading as flat matte
-## rock, which needs a fair bit less roughness (and a touch of metallic to
-## sell the "cut crystal" highlight) than the 0.9-roughness default.
+## duplicated) ShaderMaterial (scenes/world/planet_surface.gdshader) - the
+## low-poly facets stay the silhouette, this engraves a larger triangular
+## plating texture with embossed edges (as a normal map) AND a hue-rotated
+## tint right at those same edges (see the shader) on top of them, without
+## touching geometry. A plain StandardMaterial3D can't do the hue shift -
+## multiplying by a baked tint can't rotate hue relative to a base colour
+## that's different on every planet, only real HSV math can, hence the
+## custom shader instead of normal_enabled/normal_texture properties.
 func _apply_bump_pattern(mat: Material) -> void:
-	if not (mat is StandardMaterial3D):
+	if not (mat is ShaderMaterial):
 		return
-	var std_mat: StandardMaterial3D = mat as StandardMaterial3D
-	std_mat.normal_enabled = true
-	std_mat.normal_texture = _get_bump_texture()
-	std_mat.normal_scale = 0.75  ## an embossed edge should actually read as raised
+	var shader_mat: ShaderMaterial = mat as ShaderMaterial
+	shader_mat.set_shader_parameter("normal_texture", _get_bump_texture())
 	# V covers half the physical arc-length U does on a sphere (equator vs.
 	# pole-to-pole), so repeating it at the same rate as U would stretch the
 	# pattern taller than it reads around the equator - halved to compensate.
-	std_mat.uv1_scale = Vector3(BUMP_TILE_REPEAT, BUMP_TILE_REPEAT * 0.5, 1.0)
-	std_mat.roughness = minf(std_mat.roughness, 0.38)
-	std_mat.metallic = maxf(std_mat.metallic, 0.2)
+	shader_mat.set_shader_parameter("uv_scale", Vector2(BUMP_TILE_REPEAT, BUMP_TILE_REPEAT * 0.5))
 
 static func _get_bump_texture() -> ImageTexture:
 	if _bump_texture == null:
 		_bump_texture = _build_bump_texture()
 	return _bump_texture
 
-## Renders a tileable EQUILATERAL triangular lattice into a normal map, edges
-## embossed and faces flat. Per pixel, this finds the distance to the nearest
-## grid line among three families whose NORMALS point along 0/60/120 degrees
-## (real trigonometry, not a (u, v, u+v) stand-in - see BUMP_TILE_W/H) and
-## raises a thin ridge only right at that distance, leaving each triangular
-## cell's interior flat - an embossed border rather than a smooth dome. The
-## height field is then differentiated into a normal via central-difference
-## gradients, the same "height field to normal" trick any terrain normal map
-## uses.
+## Renders a tileable EQUILATERAL triangular lattice, edges embossed and
+## faces flat. Per pixel, this finds the distance to the nearest grid line
+## among three families whose NORMALS point along 0/60/120 degrees (real
+## trigonometry, not a (u, v, u+v) stand-in - see BUMP_TILE_W/H) and raises a
+## thin ridge only right at that distance, leaving each triangular cell's
+## interior flat - an embossed border rather than a smooth dome.
+##
+## RGB packs a tangent-space normal, differentiated from the height field via
+## central-difference gradients (the same "height field to normal" trick any
+## terrain normal map uses). ALPHA packs that same height field directly, 0-1 -
+## a plain normal map would leave this channel unused, and the shader reads it
+## as the edge mask driving the hue-rotate effect, so the two effects always
+## line up exactly without needing a second texture or a second UV sample.
 static func _build_bump_texture() -> ImageTexture:
 	var w: int = BUMP_TILE_W
 	var h: int = BUMP_TILE_H
 	var period: float = float(w) / float(BUMP_TILES_ACROSS)
 	var strength: float = 3.0
-	var img := Image.create(w, h, false, Image.FORMAT_RGB8)
+	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
 	for y in range(h):
 		for x in range(w):
 			var h0: float = _bump_height(float(x), float(y), period)
 			var dx: float = (_bump_height(float(x) + 1.0, float(y), period) - h0) * strength
 			var dy: float = (_bump_height(float(x), float(y) + 1.0, period) - h0) * strength
 			var n: Vector3 = Vector3(-dx, -dy, 1.0).normalized()
-			img.set_pixel(x, y, Color(n.x * 0.5 + 0.5, n.y * 0.5 + 0.5, n.z * 0.5 + 0.5))
+			img.set_pixel(x, y, Color(n.x * 0.5 + 0.5, n.y * 0.5 + 0.5, n.z * 0.5 + 0.5, h0))
 	return ImageTexture.create_from_image(img)
 
 ## Height is 1 right on a triangle edge and falls to 0 within EDGE_WIDTH
@@ -292,8 +298,10 @@ func _add_atmosphere_shell() -> void:
 	_atmosphere.mesh = SphereMesh.new()
 	var tint: Color = Color(0.45, 0.62, 1.0)
 	var surface_mat := mesh.get_surface_override_material(0)
-	if surface_mat is StandardMaterial3D:
-		tint = (surface_mat as StandardMaterial3D).albedo_color.lerp(Color(0.5, 0.7, 1.0), 0.55)
+	if surface_mat is ShaderMaterial:
+		var base_color: Variant = (surface_mat as ShaderMaterial).get_shader_parameter("albedo_color")
+		if base_color is Color:
+			tint = (base_color as Color).lerp(Color(0.5, 0.7, 1.0), 0.55)
 	var shell_mat := StandardMaterial3D.new()
 	shell_mat.albedo_color = Color(tint.r, tint.g, tint.b, 0.16)
 	shell_mat.emission_enabled = true
@@ -696,12 +704,18 @@ func _spawn_moon_fragments() -> void:
 		frag.radius = frag.radius  # trigger setter
 		var frag_mesh: MeshInstance3D = frag.get_node_or_null("MeshInstance3D")
 		if frag_mesh:
-			var frag_mat := StandardMaterial3D.new()
-			frag_mat.albedo_color = base_color
+			var frag_mat := ShaderMaterial.new()
+			frag_mat.shader = PLANET_SURFACE_SHADER
+			frag_mat.set_shader_parameter("albedo_color", base_color)
 			frag_mesh.set_surface_override_material(0, frag_mat)
 			# This replaces the material _ready() already bump-mapped (before
 			# radius/color were known), so the fragment needs the pattern
 			# applied again on its new one or it'd be the one bare planet.
+			# Every OTHER shader parameter (roughness, metallic, hue shift,
+			# normal scale) is left unset here, which is fine - an unset
+			# ShaderMaterial parameter just falls back to the uniform's own
+			# default in planet_surface.gdshader, the same values the .tscn
+			# material spells out explicitly.
 			frag._apply_bump_pattern(frag_mat)
 		# Pick a target parent body to orbit
 		var host: OrbitalBody = _pick_fragment_host(bodies, frag.radius)

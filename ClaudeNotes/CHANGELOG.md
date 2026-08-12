@@ -7,6 +7,111 @@ in [`tests/`](../tests) — see **Test harness** at the bottom.
 
 ---
 
+## 2026-08-12 — Session 11: planet shader rework, tower height overhaul, railgun scope polish, auto-slap
+
+Verified against the same real Godot 4.7 binary Session 10 found
+(`D:\Godot_v4.7-stable_win64.exe`) - headless for the gameplay probes,
+real D3D12/RTX 3060 renderer for LoadProbe/PerfProbe.
+
+### Improvement: planet material rewritten as a custom shader
+Two asks that a plain `StandardMaterial3D` genuinely can't do together: halve
+the bump-map strength (easy, just a scalar), and make the triangle edges a
+**hue rotation** of each planet's own colour (not easy - every planet has a
+different base colour, and multiplying by a baked tint can't rotate hue
+relative to a colour it doesn't know in advance; that needs real HSV math).
+Planets now use `scenes/world/planet_surface.gdshader`: samples the same
+shared triangular-lattice texture as before, but the texture's ALPHA channel
+(unused by a plain normal map) now carries the raw edge-distance value, which
+the shader converts the planet's `albedo_color` to HSV, rotates by up to
+`hue_shift_degrees` (default 45) scaled by that edge value, and converts
+back - full strength right on a triangle edge, none at a cell's centre.
+`normal_scale` halved (0.75 -> 0.375) per request. `OrbitalBody.gd`,
+`Arena.gd`'s per-planet colour assignment, and the atmosphere-tint lookup all
+updated from `StandardMaterial3D` property access to `ShaderMaterial`
+`set_shader_parameter`/`get_shader_parameter` calls.
+[scenes/world/planet_surface.gdshader](../scenes/world/planet_surface.gdshader) (new),
+[scenes/world/OrbitalBody.tscn](../scenes/world/OrbitalBody.tscn),
+[scripts/world/OrbitalBody.gd](../scripts/world/OrbitalBody.gd),
+[scripts/world/Arena.gd](../scripts/world/Arena.gd)
+
+### Improvement: tower height now radius-to-circumference
+Was capped AT the planet's radius; now randomised between the radius
+(minimum) and the full circumference (`TAU * radius`, maximum) - towers can
+end up several times taller than the planet they stand on. Kept the existing
+safety trim intact for the specific pairs `_solve_structure_heights()` exists
+to protect (the phase-locked central binary, and a moon against its own
+parent - permanently fixed separations where two full-height towers could
+grind forever): those bodies' `height_budget` is still respected as a hard
+cap even when it comes out below the planet's radius; every other body gets
+the full new range. **Performance tradeoff, not hidden**: `PerfProbe
+--sustained` after this change measured noticeably heavier than Session 10's
+verified baseline (mean ~9-10ms vs. ~4-5ms, spike counts far more variable
+run to run) - a large fraction of that is very likely the straightforward
+cost of towers that can now be 5-6x taller (proportionally more floors,
+walls, windows, and collision shapes per tower). That's the direct, expected
+consequence of the requested range, not a bug snuck in alongside it, so it
+wasn't scaled back - flagging it here rather than deciding unilaterally that
+the request was too expensive.
+[scripts/world/Arena.gd](../scripts/world/Arena.gd)
+
+### Test-run finding, not a bug: WorldProbe's CRATERHIT number swung wildly
+While verifying the above, `_test_crater_collider()`'s reported "surface
+dropped Xm" jumped from a stable ~1.00m to ~12m and back depending on
+whether the new tower-height randomisation was active - alarming at first
+glance. Root cause: `WorldProbe.gd` runs `_test_structural_collision()`
+(which deliberately forces two bodies into a full artificial overlap to
+exercise the crater-scaling code) immediately before
+`_test_crater_collider()` measures its own separate crater on one of the
+SAME bodies - crater vertices accumulate rather than reset, so the second
+test's measurement was never fully isolated from the first's. Adding a new
+`randf_range()` call per tower during Arena setup (for the new height range)
+shifts every subsequent draw from the same seeded RNG stream, changing
+exactly which bots do what and when throughout the rest of the run and, by
+extension, whether the two tests' craters happen to land near enough to
+compound. The underlying mechanism was already safety-clamped (max
+displacement 0.6x radius, so a 28m-radius planet never loses more than
+16.8m, always leaving a non-degenerate positive remainder) both before and
+after - this is test-ordering sensitivity surfaced by adding a new source of
+randomness, not a new defect in `apply_crater()` or `structural_collision()`.
+Not changed; noted for whoever next sees this number jump around.
+
+### Bug: Railgun scope had an unwanted inner ring
+`scenes/ui/scope.gdshader` drew a bright ring tracing the lens edge, inside
+the blur/darken border - removed per request; the blur-to-dark falloff alone
+still reads clearly as the edge of the optic. Crosshair reticle unaffected.
+Orphaned `ring_thickness` uniform (and its `.tscn` override) removed too.
+[scenes/ui/scope.gdshader](../scenes/ui/scope.gdshader),
+[scenes/ui/HUD.tscn](../scenes/ui/HUD.tscn)
+
+### Improvement: Railgun scope highlights other players, pans 30% faster
+`scope_sensitivity_multiplier` raised from 0.18 to `0.18 * 1.3` - still much
+slower than hipfire (a mouse-sensitivity cut is what keeps a narrow FOV from
+feeling frantic), just less sluggish than before. Separately, scoping in now
+gives every other player's model a bright unshaded red overlay for as long as
+the scope stays active (restored on holster/un-scope), so a low-poly
+silhouette is actually easy to spot at range. This is purely a local
+rendering decision - each client renders its own independent copy of every
+Player node (only position/state replicates over the network, not material
+overrides), so highlighting a remote player's model here never appears on
+their screen or anyone else's. Gated to `is_first_person_view()` specifically:
+bots carry and can scope this same weapon, and without that check a bot
+scoping in offline would highlight everyone from the one shared screen with
+no human having asked to look through a scope.
+[scripts/weapons/Railgun.gd](../scripts/weapons/Railgun.gd),
+[scripts/player/Player.gd](../scripts/player/Player.gd)
+
+### New: grapple into an automatic Bitchslap
+Reeling a hooked player all the way in (within 3m, the same range the pull
+already used to detach) now calls `Melee.try_activate()` on the shooter
+before releasing the hook, instead of leaving the follow-up to a separate
+button press. Reuses Melee's own target-finding (range + look-cone) rather
+than force-feeding it the grappled player directly, so this only actually
+lands if they're still roughly in front of the shooter when the pull
+finishes - the same condition a manually-timed slap would need to meet.
+[scripts/weapons/GrapplingHook.gd](../scripts/weapons/GrapplingHook.gd)
+
+---
+
 ## 2026-08-12 — Session 10: single flexing boundary, deck rework, turret, real perf regression caught and fixed
 
 First session this environment had a real Godot binary

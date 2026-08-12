@@ -181,9 +181,9 @@ func _build_orbital_bodies() -> void:
 		# opposite sides, to instead start on top of each other).
 		orbital_bodies_container.add_child(body)
 		var mesh: MeshInstance3D = body.get_node("MeshInstance3D")
-		var mat: StandardMaterial3D = mesh.get_surface_override_material(0)
+		var mat: ShaderMaterial = mesh.get_surface_override_material(0)
 		if mat:
-			mat.albedo_color = data["color"]
+			mat.set_shader_parameter("albedo_color", data["color"])
 		_bodies_by_name[data["name"]] = body
 
 func _build_spawn_points() -> void:
@@ -339,9 +339,20 @@ func _build_buildings() -> void:
 			# is exactly why towers used to come out a fixed 30m tall instead
 			# of matching their planet.
 			if building is Tower:
-				# Target is the planet's own radius; the solver above only trims
-				# it where a neighbour would otherwise be clipped.
-				building.tower_height = minf(body.radius, height_budget)
+				# Randomised between the planet's own radius (minimum - still a
+				# real landmark on the smallest allowed site) and its
+				# circumference (maximum - a tower that could wrap most of the
+				# way round the world if laid on its side). height_budget is
+				# only ever trimmed below body.radius for a body locked in a
+				# PERMANENTLY fixed separation from a neighbour (the central
+				# binary, a moon and its own parent - see
+				# _solve_structure_heights()); respecting that trim in those
+				# specific cases is what keeps two towers that can never drift
+				# apart from grinding into each other forever. Every other
+				# body's budget is untouched (== body.radius) and gets the
+				# full new range.
+				var target_height: float = randf_range(body.radius, TAU * body.radius)
+				building.tower_height = target_height if height_budget >= body.radius else minf(target_height, height_budget)
 				building.floor_count = maxi(2, int(building.tower_height / 9.0))
 				building.tower_width = clampf(body.radius * 0.28, 6.0, 11.0)
 			elif building is Bunker:

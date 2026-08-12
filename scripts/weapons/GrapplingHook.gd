@@ -122,6 +122,14 @@ func _do_pull(delta: float) -> void:
 		_hook_pos = _pull_target.global_position
 		var to_player: Vector3 = p.global_position - _pull_target.global_position
 		if to_player.length() < 3.0:
+			# Reeled all the way in - follow through with the Bitchslap
+			# automatically rather than leaving the catch to a separate button
+			# press. try_activate() finds its own target by range/cone (see
+			# Melee.gd), so this only actually lands if the reeled-in player
+			# is still where the pull left them; a dead/cooldown/out-of-cone
+			# no-op here is harmless, same as pressing the button and missing.
+			if p.melee:
+				p.melee.try_activate()
 			_begin_retract()
 			return
 		if _pull_target.has_method("apply_impulse"):

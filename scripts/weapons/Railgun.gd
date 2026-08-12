@@ -23,7 +23,10 @@ extends Weapon
 
 @export_group("Scope")
 @export var scope_fov: float = 18.0
-@export var scope_sensitivity_multiplier: float = 0.18
+## Fraction of hipfire mouse sensitivity kept while scoped - panning is still
+## much slower than hipfire (a narrow FOV makes raw sensitivity feel frantic),
+## but this is 30% faster than it used to be (0.18 -> 0.234).
+@export var scope_sensitivity_multiplier: float = 0.18 * 1.3
 @export var scope_transition_speed: float = 14.0
 ## How far in front of the eye the lens sits once scoped. The viewmodel slides
 ## so the scope tube lands on the camera axis, which is what makes it read as
@@ -162,6 +165,7 @@ func _handle_scope(_fire_held: bool) -> void:
 	var p: Player = owner_player as Player
 	if p == null or p.camera == null:
 		return
+	var was_active: bool = _scope_active
 	_scope_active = p.is_aiming and visible
 
 	var t: float = clamp(scope_transition_speed * get_process_delta_time(), 0.0, 1.0)
@@ -174,6 +178,23 @@ func _handle_scope(_fire_held: bool) -> void:
 	for part in _non_scope_parts:
 		part.visible = not _scope_active
 
+	if _scope_active != was_active:
+		_highlight_other_players(p, _scope_active)
+
+## Makes everyone else easy to pick out against the blurred, darkened
+## surround while scoped - a distant low-poly silhouette is otherwise easy to
+## lose against a planet's own facets. Gated to the local human specifically:
+## bots carry and scope this same weapon (their own AI can hold "aim"), and
+## without this check a bot scoping in offline would highlight everyone from
+## the one shared screen even though no human asked to look through a scope.
+func _highlight_other_players(p: Player, active: bool) -> void:
+	if not p.is_first_person_view():
+		return
+	for node in p.get_tree().get_nodes_in_group("players"):
+		if node == p or not is_instance_valid(node) or not node.has_method("set_highlighted"):
+			continue
+		node.set_highlighted(active)
+
 func is_scoped() -> bool:
 	return _scope_active
 
@@ -185,12 +206,14 @@ func overrides_aim_fov() -> bool:
 ## Put the viewmodel and the player's sensitivity back when switching away
 ## mid-scope, or the next weapon inherits a zoomed-in mouse.
 func on_holster() -> void:
+	var p: Player = owner_player as Player
+	if _scope_active and p:
+		_highlight_other_players(p, false)
 	_scope_active = false
 	if _view_model:
 		_view_model.position = Vector3.ZERO
 	for part in _non_scope_parts:
 		part.visible = true
-	var p: Player = owner_player as Player
 	if p:
 		p.mouse_sensitivity = _base_sensitivity
 

@@ -779,6 +779,48 @@ func _on_spawn_complete() -> void:
 func _is_spawning() -> bool:
 	return _spawner != null and _spawner._active
 
+## Bright unshaded overlay applied to every mesh under Model - the Railgun
+## drives this on other players while the local human is scoped in, so a
+## distant, low-poly silhouette is actually easy to pick out. Purely a local
+## rendering decision: each client renders its own copy of every Player node
+## (only position/state is networked, not material overrides), so toggling
+## this on a remote player's Model here never shows up on THEIR screen or
+## anyone else's - same reasoning as the atmosphere glow/boundary shell only
+## reacting to the local viewer.
+var _highlighted: bool = false
+var _highlight_saved_materials: Dictionary = {}
+const HIGHLIGHT_COLOR: Color = Color(1.0, 0.15, 0.15)
+
+func set_highlighted(active: bool) -> void:
+	if active == _highlighted or model == null:
+		return
+	_highlighted = active
+	if active:
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = HIGHLIGHT_COLOR
+		mat.emission_enabled = true
+		mat.emission = HIGHLIGHT_COLOR
+		mat.emission_energy_multiplier = 2.5
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		for mesh_inst in _model_meshes():
+			_highlight_saved_materials[mesh_inst] = mesh_inst.material_override
+			mesh_inst.material_override = mat
+	else:
+		for mesh_inst in _highlight_saved_materials:
+			if is_instance_valid(mesh_inst):
+				mesh_inst.material_override = _highlight_saved_materials[mesh_inst]
+		_highlight_saved_materials.clear()
+
+func _model_meshes() -> Array[MeshInstance3D]:
+	var out: Array[MeshInstance3D] = []
+	var stack: Array[Node] = [model]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if n is MeshInstance3D:
+			out.append(n)
+		stack.append_array(n.get_children())
+	return out
+
 ## The weapon to render in third person. On the authority that's simply whatever
 ## WeaponManager has selected, and publishing it here is what feeds the
 ## replicated field; on a remote copy it's whatever that field points at, applied
