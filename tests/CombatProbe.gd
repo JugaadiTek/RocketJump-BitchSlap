@@ -3,7 +3,7 @@ extends Node
 ##   BOUNDARY  - a player at the arena edge relaunches instead of sticking
 ##   TOWERWALL - tower walls keep their width all the way up
 ##   HEADSHOT  - head hits do 300%
-##   DEATH     - comic burst, bubble, giblets and splatter all spawn
+##   DEATH     - comic burst and bubble spawn
 ##   SLIME     - slugs leave a trail behind them
 ##   ASTEROID  - rocks fall, collide, streak, and crater what they hit
 ##   AUDIO     - library quality and adaptive ambience layers
@@ -165,30 +165,18 @@ func _test_death() -> void:
 	var bursts: int = 0
 	var labels: int = 0
 	var sprites: int = 0
-	var giblets: int = 0
-	var particles: int = 0
 	for child in effect.get_children():
 		if child is Label3D:
 			labels += 1
-		elif child is GPUParticles3D:
-			particles += 1
 		elif child is MeshInstance3D:
-			if child.mesh is BoxMesh:
-				giblets += 1
-			else:
-				bursts += 1
+			bursts += 1
 		elif child is Node3D:
 			for sub in child.get_children():
 				if sub is Label3D:
 					labels += 1
 				elif sub is Sprite3D:
 					sprites += 1
-	var stains: int = 0
-	for child in _body.get_children():
-		if child is MeshInstance3D and child.mesh is QuadMesh:
-			stains += 1
-	_log("DEATH   burst=%d comic labels=%d skull sprites=%d giblets=%d blood emitters=%d ground splatter=%d" % [
-		bursts, labels, sprites, giblets, particles, stains])
+	_log("DEATH   burst=%d comic labels=%d skull sprites=%d" % [bursts, labels, sprites])
 
 func _test_asteroids() -> void:
 	var field: DebrisField = _arena.get_node_or_null("DebrisField")

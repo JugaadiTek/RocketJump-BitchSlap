@@ -700,7 +700,7 @@ func _die(instigator: Node, weapon_name: String) -> void:
 
 const DEATH_EFFECT := preload("res://scripts/world/DeathEffect.gd")
 
-## Comic-book kill marker plus gore, dropped at the spot we fell.
+## Comic-book kill marker dropped at the spot we fell.
 func _spawn_death_effect() -> void:
 	var effect := DEATH_EFFECT.new()
 	var root: Node = get_tree().current_scene
@@ -708,11 +708,7 @@ func _spawn_death_effect() -> void:
 		return
 	root.add_child(effect)
 	effect.global_position = global_position
-	var body: OrbitalBody = GravityManager.get_nearest_body(global_position)
-	var normal: Vector3 = up_direction
-	if body:
-		normal = (global_position - body.global_position).normalized()
-	effect.setup(display_name, up_direction, normal)
+	effect.setup(display_name, up_direction)
 
 func _respawn() -> void:
 	health = max_health
