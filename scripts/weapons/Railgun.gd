@@ -38,6 +38,8 @@ var _view_model: Node3D = null
 ## Where the viewmodel has to sit for the scope to line up with the camera axis.
 var _scope_ads_offset: Vector3 = Vector3.ZERO
 var _base_sensitivity: float = 0.0025
+## Everything in the viewmodel except the scope itself - hidden while scoped.
+var _non_scope_parts: Array[MeshInstance3D] = []
 
 func _ready() -> void:
 	super._ready()
@@ -49,6 +51,16 @@ func _ready() -> void:
 		# X/Y is exactly the shift that puts the lens on the camera's own axis.
 		var rest: Vector3 = holder.position + position + _view_model.position + scope.position
 		_scope_ads_offset = Vector3(-rest.x, -rest.y, scope_eye_relief)
+	# Sliding the WHOLE viewmodel to put the scope on the camera axis also
+	# drags the barrel (Body) there, since it was authored only ~5mm off the
+	# scope's own X/Y to begin with (they're meant to look roughly coaxial at
+	# rest) - close enough that scoping in put a solid box from the barrel
+	# directly across the view, same complaint as the scope tube itself used
+	# to be. Everything but the scope assembly hides while scoped instead.
+	if _view_model:
+		for child in _view_model.get_children():
+			if child is MeshInstance3D:
+				_non_scope_parts.append(child)
 	var p: Player = owner_player as Player
 	if p:
 		_base_sensitivity = p.mouse_sensitivity
@@ -138,7 +150,11 @@ func _do_fire_with_damage(muzzle_transform: Transform3D, aim_direction: Vector3,
 ## Aiming down the sights on the railgun means going through the optic: the
 ## viewmodel slides until the scope tube is centred on the camera axis, the FOV
 ## drops to scope_fov, sensitivity scales to match, and the HUD's scope overlay
-## blurs and darkens everything outside the lens.
+## blurs and darkens everything outside the lens. Everything in the viewmodel
+## except the scope assembly (the barrel, the stock) hides for the duration -
+## sliding the model to put the scope on-axis puts the barrel almost exactly
+## on that same axis too (see _non_scope_parts), which read as vision being
+## blocked just as badly as the old solid scope tube did.
 ##
 ## Reads p.is_aiming rather than polling the mouse directly, so bots (which set
 ## it through _wants_aim()) scope the same way a human does.
@@ -155,6 +171,8 @@ func _handle_scope(_fire_held: bool) -> void:
 	if _view_model:
 		_view_model.position = _view_model.position.lerp(
 			_scope_ads_offset if _scope_active else Vector3.ZERO, t)
+	for part in _non_scope_parts:
+		part.visible = not _scope_active
 
 func is_scoped() -> bool:
 	return _scope_active
@@ -170,6 +188,8 @@ func on_holster() -> void:
 	_scope_active = false
 	if _view_model:
 		_view_model.position = Vector3.ZERO
+	for part in _non_scope_parts:
+		part.visible = true
 	var p: Player = owner_player as Player
 	if p:
 		p.mouse_sensitivity = _base_sensitivity

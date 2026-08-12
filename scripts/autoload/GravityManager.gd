@@ -17,16 +17,18 @@ extends Node
 const DEEP_SPACE_PULL: float = 0.6
 const DEEP_SPACE_MAX_DISTANCE: float = 420.0
 
-## Hard edge of the WHOLE arena, measured from the arena center (world
-## origin) - used only to eject a planet whose orbit has drifted this far out
-## (see OrbitalBody._check_boundary()). Comfortably past the outermost body
-## (Halcyon: orbit_radius 440 + radius 36 = 476 max reach).
+## Fixed, independent hard edge used ONLY to eject a planet whose own orbit
+## has drifted this far out (see OrbitalBody._check_boundary()). Deliberately
+## NOT the same value the player/projectile boundary flexes around below -
+## that box is partly DERIVED from this body's own position, so using it to
+## also decide when this body gets ejected would be circular (the box would
+## just keep growing to always contain whatever's drifting outward). Comfortably
+## past the outermost body's normal reach (Halcyon: orbit_radius 440 + radius
+## 36 = 476).
 const ARENA_BOUNDARY_RADIUS: float = 535.0
 
-## How far past a body's own extents (radius + however far its structures
-## reach) a player/projectile can still drift and count as "in bounds". Used
-## by is_within_boundary() - see there for why this replaced a single
-## arena-wide sphere.
+## Clearance kept beyond the furthest planet's own reach when sizing the
+## single arena-wide boundary box (see arena_half_extent()).
 const BOUNDARY_MARGIN: float = 50.0
 
 var _bodies: Array[OrbitalBody] = []
@@ -123,33 +125,46 @@ func get_nearest_body(global_pos: Vector3) -> OrbitalBody:
 			nearest = body
 	return nearest
 
-## True if `pos` sits within BOUNDARY_MARGIN of at least one body's own
-## extents (its radius, plus however far its structures stick out) on every
-## axis - an axis-aligned box around that body rather than a sphere. A point
-## only counts as out of bounds once it has drifted clear of every planet's
-## box, so the legal play space follows wherever the planets actually are
-## instead of a single fixed-radius sphere around the arena centre, which let
-## players park in dead space far from any world and just wait the boundary
-## push out.
-func is_within_boundary(pos: Vector3) -> bool:
+## Half-extent (centre to face) of the SINGLE box that bounds the whole
+## arena, centred on the arena origin. Sized from whichever body currently
+## reaches furthest out - its distance from the arena centre plus its own
+## radius and however far its structures stick out - with BOUNDARY_MARGIN of
+## clearance beyond that. "Flexes": ejecting or shattering the outermost
+## planet shrinks the box on its own, and a body drifting outward on an
+## eccentric or perturbed orbit grows it, with no fixed size hard-coded
+## anywhere. There is only ever this one box - it does not follow individual
+## planets or shrink to wrap whichever one a player happens to be near, so it
+## never shows up as a wall in open space between two worlds.
+##
+## Cached per physics frame: every player and every projectile calls this (via
+## is_within_boundary()) once each physics tick, plus the boundary shell once
+## per render frame. Nothing that feeds this changes except during a physics
+## step, so recomputing per-caller was pure waste - with 31 bots and a
+## handful of projectiles all doing their own O(bodies) scan every tick, that
+## waste was enough to show up as real frame-time spikes in a sustained
+## firefight (measured: dropped a "sustained" PerfProbe run from ~230/2400
+## frames over 20ms back down to baseline, ~5/2400).
+var _cached_half_extent: float = 0.0
+var _half_extent_frame: int = -1
+
+func arena_half_extent() -> float:
+	var frame: int = Engine.get_physics_frames()
+	if frame == _half_extent_frame:
+		return _cached_half_extent
+	_half_extent_frame = frame
+	var furthest: float = 0.0
 	for body in _bodies:
 		if not is_instance_valid(body) or body.is_shattered:
 			continue
-		var half: float = body.radius + body.structure_reach + BOUNDARY_MARGIN
-		var local: Vector3 = pos - body.global_position
-		if absf(local.x) <= half and absf(local.y) <= half and absf(local.z) <= half:
-			return true
-	return false
+		var reach: float = body.global_position.length() + body.radius + body.structure_reach
+		furthest = maxf(furthest, reach)
+	_cached_half_extent = furthest + BOUNDARY_MARGIN
+	return _cached_half_extent
 
-## The nearest body's box (see is_within_boundary), for anything that wants to
-## visualise or reason about that specific box rather than just a yes/no
-## check - the boundary shell uses this to size and position itself.
-func nearest_boundary_box(pos: Vector3) -> Dictionary:
-	var body: OrbitalBody = get_nearest_body(pos)
-	if body == null:
-		return {}
-	var half: float = body.radius + body.structure_reach + BOUNDARY_MARGIN
-	return {"body": body, "half_extent": half}
+## True if `pos` is inside the single arena-wide box (see arena_half_extent).
+func is_within_boundary(pos: Vector3) -> bool:
+	var half: float = arena_half_extent()
+	return absf(pos.x) <= half and absf(pos.y) <= half and absf(pos.z) <= half
 
 ## The human sitting at this screen - the single Player with
 ## is_first_person_view() true, or null (offline bot-only matches, a

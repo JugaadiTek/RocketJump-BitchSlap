@@ -77,9 +77,9 @@ func _ready() -> void:
 		if t > 20.0:
 			spikes += 1
 	var mean: float = total / float(n)
-	_log("%-16s mean=%5.2fms (%.0f fps)  p95=%5.2f  worst=%6.2f  spikes>20ms=%d/%d  draws=%4d  nodes=%d" % [
+	_log("%-16s mean=%5.2fms (%.0f fps)  p95=%5.2f  worst=%6.2f  spikes>20ms=%d/%d  draws=%4d  nodes=%d  bodies=%d" % [
 		_mode, mean, 1000.0 / mean, frames[int(n * 0.95)], frames[n - 1], spikes, n,
-		int(calls / float(n)), int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))])
+		int(calls / float(n)), int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)), GravityManager.get_bodies().size()])
 	get_tree().quit()
 
 func _apply_mode() -> void:

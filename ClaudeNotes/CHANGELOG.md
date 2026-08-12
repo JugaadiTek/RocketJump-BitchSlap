@@ -7,6 +7,161 @@ in [`tests/`](../tests) — see **Test harness** at the bottom.
 
 ---
 
+## 2026-08-12 — Session 10: single flexing boundary, deck rework, turret, real perf regression caught and fixed
+
+First session this environment had a real Godot binary
+(`D:\Godot_v4.7-stable_win64.exe`, 4.7.stable) - every claim below is from an
+actual run, headless for the gameplay probes and with the real D3D12/RTX 3060
+renderer for LoadProbe/PerfProbe, not the "not yet run" caveat the last two
+entries had to carry.
+
+### Correction: one single boundary box, not one per planet
+Session 9's per-planet box (each planet got its own 50m box, "in bounds" if
+near ANY of them) was a misread of the ask. Replaced with what was actually
+requested: **one** box for the whole arena, centred on the arena origin,
+sized to whichever planet currently reaches furthest out plus a margin
+(`GravityManager.arena_half_extent()`) - it flexes as orbits drift and
+planets are destroyed, but there's only ever the one wall, and it never shows
+up out in open space between two worlds the way a per-planet box could.
+`ArenaBoundary.gd` no longer tracks the local viewer's nearest planet either -
+it's just the one box, resized every frame. Projectiles (`Projectile.gd`,
+`Slug.gd`) check the same single box instead of the old fixed-radius sphere,
+so a shot that misses everything now actually gets cleaned up at the edge
+instead of living out its full lifetime timer in the void.
+[scripts/autoload/GravityManager.gd](../scripts/autoload/GravityManager.gd),
+[scripts/world/ArenaBoundary.gd](../scripts/world/ArenaBoundary.gd),
+[scripts/weapons/Projectile.gd](../scripts/weapons/Projectile.gd),
+[scripts/weapons/Slug.gd](../scripts/weapons/Slug.gd)
+
+### Performance regression caught and fixed by actually testing
+`PerfProbe --sustained` on real hardware told a very different story than
+reasoning about the code did: mean frame time roughly doubled and frames
+over 20ms went from a baseline **4/2400 to 219-398/2400** depending on run -
+a chaotic 31-bot match would have stuttered hard maybe 1 frame in 10.
+Bisected with `git stash` against the pre-session commit to get a true
+baseline, then piece by piece: reverting the OrbitalBody.gd changes alone
+made it *worse*, ruling that file out; reverting the whole boundary system
+(GravityManager/Player/Projectile/Slug/ArenaBoundary) dropped it straight
+back to baseline (6/2400). Cause: `arena_half_extent()` is an O(bodies) scan,
+and unlike the local-viewer lookup fixed the same way in Session 8, it
+wasn't cached - every one of 31 players plus every active projectile was
+redoing that scan from scratch every physics tick, and the boundary shell
+redid it again every render frame. Cached per physics frame (nothing it
+reads changes except during a physics step, so the cached value is never
+stale), the same pattern `find_local_viewer()` already used. Re-verified
+twice after the fix: 4.02ms/1 spike and 4.68ms/1 spike - at or better than
+the pre-session baseline. `PerfProbe.gd` now also logs live body count, and
+its old spot-check nature is worth restating: this only surfaced because the
+probe was actually run with a real renderer, not inferred from the code.
+[scripts/autoload/GravityManager.gd](../scripts/autoload/GravityManager.gd),
+[tests/PerfProbe.gd](../tests/PerfProbe.gd)
+
+### Test fix: WorldProbe's foundation check was silently measuring the wrong thing
+While running the suite, `_test_foundations()` reported a Tower floating
++7.57m above its planet - alarming, until tracing it back to Session 6's
+mesh-merge optimization: `Building._commit_shell()` welds every wall/box
+into ONE `MeshInstance3D` with a single `ArrayMesh`, so the per-piece
+`BoxMesh` scan this test relied on stopped finding walls or foundations
+years (well, sessions) ago - the only individual `BoxMesh` children left on
+a building are the roof flag and light bulbs, deliberately elevated
+fixtures. The test had been quietly reporting "how high is the flag" instead
+of "does the building touch the ground" ever since, with nothing to flag
+that it had gone stale. Now reads the merged shell's actual mesh vertices
+(`get_faces()`) when there's no BoxMesh to inspect. Re-run: worst case is
+now -0.95m (embedded into the surface, the intended foundation sink), not
+floating.
+[tests/WorldProbe.gd](../tests/WorldProbe.gd)
+
+### Improvement: planet-to-planet collisions actually resolve now
+Root cause of "planets squishing together and dragging": `GravityManager`
+triggers a structural collision once the two bodies' BUILDINGS come into
+reach, which is usually well before their bare rock touches - so the
+deformation added last session almost always computed zero overlap on the
+opening hit. With a 3-second cooldown between corrections, a slow sustained
+approach got one small nudge and one small crater every three seconds while
+the rock kept sinking into itself in between. Two changes: the orbital kick
+now scales up sharply (up to 6x) once there's genuine rock overlap rather
+than just a mass-ratio nudge regardless of depth, and the cooldown dropped
+from 3.0s to 0.5s, so sustained contact keeps getting corrected every few
+tenths of a second instead of every three.
+[scripts/world/OrbitalBody.gd](../scripts/world/OrbitalBody.gd)
+
+### Fix: Railgun scope - the barrel was still blocking the view
+The tube/lens fix from two sessions ago wasn't the whole story. Scoping in
+slides the WHOLE viewmodel so the scope lands on the camera axis - and the
+barrel (`Body`) was authored only ~5mm off the scope's own X/Y offset to
+begin with (they're meant to look roughly coaxial at rest), close enough
+that the slide dragged the barrel onto the camera axis too. Same complaint,
+different piece of geometry. Now everything but the scope assembly (barrel,
+stock) hides for the duration of the scope.
+[scripts/weapons/Railgun.gd](../scripts/weapons/Railgun.gd)
+
+### Bug: ladder climbing snagged on tower geometry
+The shaft is a tight fit, and a real structural corner sits right where it
+meets the tower's outer walls - the walls run the tower's full width, and
+only the floor slabs get a hole cut for the shaft, so a standing player's
+capsule brushing that corner mid-climb caught on it constantly. Climbing is
+already a locked, directed motion (gravity suspended, velocity driven
+straight from input along the ladder's axis) rather than free physics, so
+there's nothing for world collision to usefully do during a climb except
+snag on geometry the Ladder trigger volume already keeps you inside of.
+World collision (layer 1 only, not the whole mask) now drops for the
+duration of a climb and restores on exit.
+[scripts/player/Player.gd](../scripts/player/Player.gd)
+
+### Tower observation deck: three rounds of revision
+1. First pass: wider deck, roof on inset corner pillars instead of full
+   walls, low parapet, bigger windows on the enclosed floors below.
+2. Correction: parapet lowered further, roof height increased, deck widened
+   more.
+3. Final correction, mid-session: parapet **removed entirely** (nothing
+   between a defender and the drop - the whole point is an unobstructed look
+   straight down), open headroom doubled again (now 3.8m), deck widened to
+   2.4x the tower's own width (was 1.6x, then increased once more).
+
+`Building._add_slab_with_hole()` always cuts its hole at the slab's own
+corner, which only matches the tower's own (narrower) floors - a new
+`Tower._add_deck_slab()` cuts the hole at the ladder's actual shaft position
+instead, so the shaft stays aligned through the wider deck the same way it
+does through every floor below it. `footprint_radius()`/`structure_height()`
+updated to measure the deck (now both the widest and the tallest part)
+rather than the old roof cap.
+[scripts/world/Tower.gd](../scripts/world/Tower.gd)
+
+### New: Turret, a third building silhouette
+`Bunker` was the only other pairing Tower ever had, so "increase the
+variety" meant an actual new type rather than retuning existing ones: a
+small firing platform on four stilt legs, reached by a stepped climb (this
+system only ever authors axis-aligned boxes, so a smooth ramp isn't
+representable - same constraint `_add_deck_slab`'s corner braces already
+worked within). No interior, no ladder; short and exposed rather than tall
+and towering (Tower) or squat and sealed (Bunker). `Arena._pick_building_scene()`
+now coin-flips between Bunker and Turret for non-tower plots instead of
+defaulting to Bunker alone. `WorldProbe.gd`'s foundation check exempts
+Turret from its worst-case report (deliberately stilted, not a floating-
+building regression) and its building-count log now reports turrets too.
+[scripts/world/Turret.gd](../scripts/world/Turret.gd) (new),
+[scenes/world/Turret.tscn](../scenes/world/Turret.tscn) (new),
+[scripts/world/Arena.gd](../scripts/world/Arena.gd),
+[tests/WorldProbe.gd](../tests/WorldProbe.gd)
+
+### Fix: planet material - actually equilateral triangles this time, referencing concept art
+Session 9's rework fixed the tiling seam but not the shape: it summed three
+triangle waves along `(u, v, u+v)`, which are 90 and 45 degrees apart in
+plain pixel space, not the 60 degrees an equilateral lattice needs - so the
+"triangles" were really right-angled ones. Rebuilt properly this time: the
+bump tile is a non-square rectangle (`height = width * sqrt(3)`, the actual
+fundamental domain of a triangular/hex tiling) with three line families at
+real 0/60/120-degree normals, which tiles seamlessly AND is genuinely
+equilateral. Also made much bigger (16 apparent triangles around a planet,
+was 156) per the second correction, and the base material moved toward the
+concept art's cut-gem look - lower roughness, a touch of metallic - since
+the reference art's facets catch hard, distinct specular glints rather than
+reading as flat matte rock.
+[scripts/world/OrbitalBody.gd](../scripts/world/OrbitalBody.gd)
+
+---
+
 ## 2026-08-12 — Session 9: adaptive boundary, observation decks, ladder curvature, bump map rework
 
 Not yet run through the headless probes in this environment (no Godot binary

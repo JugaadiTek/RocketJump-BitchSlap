@@ -99,11 +99,14 @@ func _test_buildings() -> void:
 	_log("BUILDING %d towers, %d with a clear interior; heights vs planet radius = [%s]" % [
 		checked, hollow, ", ".join(height_report)])
 	var bunkers: int = 0
+	var turrets: int = 0
 	for body in GravityManager.get_bodies():
 		for child in body.get_children():
 			if child is Bunker:
 				bunkers += 1
-	_log("BUILDING %d bunkers placed" % bunkers)
+			elif child is Turret:
+				turrets += 1
+	_log("BUILDING %d bunkers, %d turrets placed" % [bunkers, turrets])
 
 ## Drop a player into a tower's ladder volume and hold "climb".
 func _test_ladder() -> void:
@@ -185,25 +188,48 @@ func _test_spawn_and_crater() -> void:
 ## Buildings must not float. Measured in world space against the planet centre,
 ## because pieces are now wrapped onto the sphere - a piece's local Y is no
 ## longer "height above the base", so the old flat measurement was meaningless.
+##
+## Reads the merged shell's actual vertices, not per-piece BoxMesh children -
+## Building._commit_shell() welds every wall/box into ONE MeshInstance3D with
+## a single ArrayMesh (the per-piece-draw-call fix - see CHANGELOG Session 6),
+## so individual BoxMesh children stopped existing for walls/foundations. The
+## only BoxMesh children left on a Tower are the roof flag and light bulbs -
+## deliberately elevated fixtures - so the old per-piece scan was quietly
+## measuring "how high is the flag" instead of "does the building touch the
+## ground" ever since that merge, without ever failing loudly about it.
+##
+## Turret is exempted from the worst-case report: it's deliberately raised on
+## stilt legs rather than sitting flush, so a gap there is the design, not a
+## floating-building bug, and including it would drown out a genuine Tower/
+## Bunker regression under an expected, harmless number.
 func _test_foundations() -> void:
 	var worst_gap: float = -INF
 	var worst: String = ""
 	var checked: int = 0
 	for body in GravityManager.get_bodies():
 		for child in body.get_children():
-			if not (child is Building):
+			if not (child is Building) or child is Turret:
 				continue
 			checked += 1
 			var lowest: float = INF
 			for piece in child.get_children():
-				if not (piece is MeshInstance3D) or not (piece.mesh is BoxMesh):
+				if not (piece is MeshInstance3D):
 					continue
-				var half: Vector3 = (piece.mesh as BoxMesh).size * 0.5
-				for sx in [-1.0, 1.0]:
-					for sy in [-1.0, 1.0]:
-						for sz in [-1.0, 1.0]:
-							var corner: Vector3 = piece.global_transform * Vector3(half.x * sx, half.y * sy, half.z * sz)
-							lowest = minf(lowest, corner.distance_to(body.global_position))
+				var mesh_inst: MeshInstance3D = piece
+				if mesh_inst.mesh is BoxMesh:
+					var half: Vector3 = (mesh_inst.mesh as BoxMesh).size * 0.5
+					for sx in [-1.0, 1.0]:
+						for sy in [-1.0, 1.0]:
+							for sz in [-1.0, 1.0]:
+								var corner: Vector3 = mesh_inst.global_transform * Vector3(half.x * sx, half.y * sy, half.z * sz)
+								lowest = minf(lowest, corner.distance_to(body.global_position))
+				elif mesh_inst.mesh != null:
+					# The merged shell (walls, floors, the foundation plinth):
+					# an ArrayMesh, so read its faces directly instead of
+					# assuming a BoxMesh shape.
+					for v in mesh_inst.mesh.get_faces():
+						var world_v: Vector3 = mesh_inst.global_transform * v
+						lowest = minf(lowest, world_v.distance_to(body.global_position))
 			if lowest == INF:
 				continue
 			# Positive means the lowest geometry stops short of the surface, i.e.
@@ -211,7 +237,7 @@ func _test_foundations() -> void:
 			var gap: float = lowest - body.radius
 			if gap > worst_gap:
 				worst_gap = gap
-				worst = "%s/%s" % [body.name, "Tower" if child is Tower else "Bunker"]
+				worst = "%s/%s" % [body.name, "Tower" if child is Tower else "Bunker"]  ## only Tower/Bunker reach here - Turret is excluded above
 	_log("FOUNDATION %d buildings; deepest geometry vs surface, worst case %+.2fm%s" % [
 		checked, worst_gap, (" (" + worst + ")") if worst != "" else ""])
 

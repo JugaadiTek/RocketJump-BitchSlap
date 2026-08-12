@@ -189,23 +189,37 @@ func _orient_orbit_ring() -> void:
 ## Baked once and shared by every planet's material (see Asteroid.gd for why
 ## sharing a generated resource across near-identical instances matters) -
 ## only the tiny tile is ever built, however many planets use it.
-const BUMP_TILE_SIZE: int = 128
-## How many triangle-grid periods fit across the tile itself, and how many
-## times the tile then repeats across a planet's UV. What actually reads as
-## "one triangle" on a planet's surface is roughly BUMP_TILE_FREQ *
-## BUMP_TILE_REPEAT of them around the sphere - both were far too high
-## before (6 * 26 = 156), fine enough to blur into noise instead of reading
-## as triangles at all. A flat repeat count rather than one scaled per-radius,
-## so a 44m world and a 5m pebble read as the same hull plating at different
-## zoom rather than the pattern changing scale.
-const BUMP_TILE_FREQ: float = 3.0
-const BUMP_TILE_REPEAT: float = 9.0
+##
+## The tile is NOT square. A true equilateral-triangle lattice (three line
+## families 60 degrees apart) only repeats seamlessly over a rectangle of
+## height = width * sqrt(3) - the standard fundamental domain for a
+## triangular/hex tiling. The previous version used a square tile with a
+## u+v diagonal standing in for the 60-degree family, which is only actually
+## a 45-degree line in plain (u, v) pixel space - that made the "triangles"
+## really right-angled isoceles ones (and squares), not equilateral. Building
+## the tile at the correct aspect ratio and using real trigonometry for the
+## three line directions fixes the shape instead of approximating it.
+const BUMP_TILE_W: int = 128
+const BUMP_TILE_H: int = 222  ## round(128 * sqrt(3)) = 221.7
+## Triangles across the tile's own width. Must be EVEN - the 60/120 degree
+## line families only wrap seamlessly at an even count (each shifts by a
+## half-integer number of periods per whole tile width, so two tile-widths
+## are needed to close the loop unless the count itself is even). Combined
+## with BUMP_TILE_REPEAT this sets how big a triangle reads on a planet's
+## surface - both were far too high before (6 * 26 = 156 periods around the
+## sphere, fine enough to blur into noise); this is 4 * 4 = 16.
+const BUMP_TILES_ACROSS: int = 4
+const BUMP_TILE_REPEAT: float = 4.0
 static var _bump_texture: ImageTexture = null
 
 ## Applies the shared triangular bump pattern to a (per-instance, already
 ## duplicated) surface material as a normal map - the low-poly facets stay
 ## the silhouette, this engraves a larger triangular plating texture with
-## embossed edges on top of them without touching geometry.
+## embossed edges on top of them without touching geometry. Also brings the
+## base material closer to the concept art's faceted-gem look: those facets
+## catch hard, distinct specular glints rather than reading as flat matte
+## rock, which needs a fair bit less roughness (and a touch of metallic to
+## sell the "cut crystal" highlight) than the 0.9-roughness default.
 func _apply_bump_pattern(mat: Material) -> void:
 	if not (mat is StandardMaterial3D):
 		return
@@ -213,49 +227,54 @@ func _apply_bump_pattern(mat: Material) -> void:
 	std_mat.normal_enabled = true
 	std_mat.normal_texture = _get_bump_texture()
 	std_mat.normal_scale = 0.75  ## an embossed edge should actually read as raised
-	std_mat.uv1_scale = Vector3(BUMP_TILE_REPEAT, BUMP_TILE_REPEAT, 1.0)
+	# V covers half the physical arc-length U does on a sphere (equator vs.
+	# pole-to-pole), so repeating it at the same rate as U would stretch the
+	# pattern taller than it reads around the equator - halved to compensate.
+	std_mat.uv1_scale = Vector3(BUMP_TILE_REPEAT, BUMP_TILE_REPEAT * 0.5, 1.0)
+	std_mat.roughness = minf(std_mat.roughness, 0.38)
+	std_mat.metallic = maxf(std_mat.metallic, 0.2)
 
 static func _get_bump_texture() -> ImageTexture:
 	if _bump_texture == null:
 		_bump_texture = _build_bump_texture()
 	return _bump_texture
 
-## Renders a tileable triangular lattice into a normal map, edges embossed and
-## faces flat - the previous version summed three overlapping triangle waves
-## into a smooth height field, which produced a moire-ish wobble rather than
-## anything reading as triangles, since a smooth sum has no actual edges
-## anywhere. This instead finds, per pixel, the distance to the NEAREST grid
-## line among three families running along u, v, and u+v (the standard way to
-## draw a triangular/hex lattice: three sets of parallel lines at 60 degrees
-## to each other, exactly periodic in u and v for any integer frequency, so
-## the tile wraps with no seam) and raises a thin ridge only right at that
-## distance, leaving each triangular cell's interior flat. The height field is
-## then differentiated into a normal via central-difference gradients - the
-## same "height field to normal" trick any terrain normal map uses.
+## Renders a tileable EQUILATERAL triangular lattice into a normal map, edges
+## embossed and faces flat. Per pixel, this finds the distance to the nearest
+## grid line among three families whose NORMALS point along 0/60/120 degrees
+## (real trigonometry, not a (u, v, u+v) stand-in - see BUMP_TILE_W/H) and
+## raises a thin ridge only right at that distance, leaving each triangular
+## cell's interior flat - an embossed border rather than a smooth dome. The
+## height field is then differentiated into a normal via central-difference
+## gradients, the same "height field to normal" trick any terrain normal map
+## uses.
 static func _build_bump_texture() -> ImageTexture:
-	var size: int = BUMP_TILE_SIZE
-	var freq: float = BUMP_TILE_FREQ
+	var w: int = BUMP_TILE_W
+	var h: int = BUMP_TILE_H
+	var period: float = float(w) / float(BUMP_TILES_ACROSS)
 	var strength: float = 3.0
-	var texel: float = 1.0 / float(size)
-	var img := Image.create(size, size, false, Image.FORMAT_RGB8)
-	for y in range(size):
-		for x in range(size):
-			var u: float = float(x) / float(size)
-			var v: float = float(y) / float(size)
-			var h0: float = _bump_height(u, v, freq)
-			var dx: float = (_bump_height(u + texel, v, freq) - h0) * strength
-			var dy: float = (_bump_height(u, v + texel, freq) - h0) * strength
+	var img := Image.create(w, h, false, Image.FORMAT_RGB8)
+	for y in range(h):
+		for x in range(w):
+			var h0: float = _bump_height(float(x), float(y), period)
+			var dx: float = (_bump_height(float(x) + 1.0, float(y), period) - h0) * strength
+			var dy: float = (_bump_height(float(x), float(y) + 1.0, period) - h0) * strength
 			var n: Vector3 = Vector3(-dx, -dy, 1.0).normalized()
 			img.set_pixel(x, y, Color(n.x * 0.5 + 0.5, n.y * 0.5 + 0.5, n.z * 0.5 + 0.5))
 	return ImageTexture.create_from_image(img)
 
-## Height is 1 right on a triangle edge and falls to 0 within EDGE_WIDTH of
-## it, flat (0) the rest of the way to the cell centre - an embossed border
-## rather than a smooth dome.
-const BUMP_EDGE_WIDTH: float = 0.09
+## Height is 1 right on a triangle edge and falls to 0 within EDGE_WIDTH
+## periods of it, flat (0) the rest of the way to the cell centre - an
+## embossed border rather than a smooth dome.
+const BUMP_EDGE_WIDTH: float = 0.1
+## sqrt(3)/2 - the y-component of the 60/120 degree line normals.
+const BUMP_SIN60: float = 0.8660254
 
-static func _bump_height(u: float, v: float, freq: float) -> float:
-	var d: float = minf(_line_dist(u * freq), minf(_line_dist(v * freq), _line_dist((u + v) * freq)))
+static func _bump_height(x: float, y: float, period: float) -> float:
+	var s0: float = x / period
+	var s1: float = (x * 0.5 + y * BUMP_SIN60) / period
+	var s2: float = (-x * 0.5 + y * BUMP_SIN60) / period
+	var d: float = minf(_line_dist(s0), minf(_line_dist(s1), _line_dist(s2)))
 	return 1.0 - smoothstep(0.0, BUMP_EDGE_WIDTH, d)
 
 ## Distance from `x` to the nearest integer (i.e. the nearest grid line in
@@ -539,20 +558,40 @@ func perturb_orbit(impact_strength: float = 1.0) -> void:
 		)).normalized()
 
 ## Two planets have drifted close enough that the buildings on their surfaces
-## are colliding. Unlike perturb_orbit()'s sub-1% drift, this is a real impact:
+## - or, if they're deep enough into each other, their actual rock - are
+## colliding. Unlike perturb_orbit()'s sub-1% drift, this is a real impact:
 ## the outer body is flung further out and slowed, the inner one is dragged in
 ## and sped up, scaled by their relative mass so a moon bounces off a planet
 ## rather than the other way round. Also craters both at the contact point.
+##
+## GravityManager triggers this once BUILDINGS come into reach (radius +
+## structure_reach on both sides), which can be well before the bare spheres
+## themselves touch - overlap is usually 0 on the opening hit. The mass-only
+## kick used to leave that as the entire response even once the spheres WERE
+## genuinely overlapping, and a 3-second cooldown meant a slow, sustained
+## approach only got one small nudge and one small crater every three
+## seconds while the rock kept sinking into itself in between - which is
+## what read as "squishing together and dragging" rather than a resolved
+## impact. Two changes: the kick itself now scales up sharply with actual
+## rock overlap (structure-only contact still gets the old gentle nudge), and
+## the cooldown is much shorter, so a sustained approach gets re-corrected
+## every few tenths of a second instead of every three.
 func structural_collision(other: OrbitalBody) -> void:
 	if is_shattered or other.is_shattered or orbit_pivot == null:
 		return
+	var separation: float = global_position.distance_to(other.global_position)
+	var overlap: float = maxf((radius + other.radius) - separation, 0.0)
+	# Fraction of this body's OWN radius currently buried in the other body -
+	# 0 when only structures have touched, up to 1 for a serious embedding.
+	var overlap_ratio: float = clampf(overlap / maxf(radius, 1.0), 0.0, 1.0)
+
 	# Mass goes as radius cubed, so a big world barely notices a small one.
 	var own_mass: float = pow(radius, 3.0)
 	var other_mass: float = pow(other.radius, 3.0)
 	var share: float = other_mass / maxf(own_mass + other_mass, 0.001)
 
 	var outward: float = 1.0 if orbit_radius >= other.orbit_radius else -1.0
-	var kick: float = clampf(share, 0.0, 0.9) * randf_range(0.04, 0.09)
+	var kick: float = clampf(share, 0.0, 0.9) * randf_range(0.04, 0.09) * (1.0 + overlap_ratio * 5.0)
 	orbit_radius = maxf(orbit_radius * (1.0 + outward * kick), radius * 1.5)
 	# Pushed outward means slowing down, dragged inward means speeding up.
 	orbit_speed *= (1.0 - outward * kick * 0.5)
@@ -565,21 +604,20 @@ func structural_collision(other: OrbitalBody) -> void:
 	) * share).normalized()
 
 	var contact: Vector3 = global_position + (other.global_position - global_position).normalized() * radius
-	# The orbital kick above only resolves the overlap over the next several
-	# seconds as the two bodies drift apart; on the frame of impact their
-	# spheres can already be interpenetrating. Craters used to always be a
-	# small fixed size regardless, so a deep overlap still read as one planet
-	# poking visibly through the other. Scaling the dent (and its radius) with
-	# how far the spheres actually overlap makes each body carve away enough
-	# of its own facing hemisphere that, combined with the other body doing
-	# the same on its own call, the two surfaces clear each other.
-	var separation: float = global_position.distance_to(other.global_position)
-	var overlap: float = maxf((radius + other.radius) - separation, 0.0)
+	# Scaling the dent (and its radius) with how far the spheres actually
+	# overlap makes each body carve away enough of its own facing hemisphere
+	# that, combined with the other body doing the same on its own call, the
+	# two surfaces clear each other - and with the cooldown now short, this
+	# reapplies every few tenths of a second for as long as contact holds
+	# instead of leaving a sustained graze to just keep sinking in.
 	var dent_depth: float = clampf(overlap * 0.6 + radius * 0.04, 0.8, radius * 0.6)
 	var dent_radius: float = clampf(radius * 0.3 + overlap * 0.8, 2.0, radius * 0.9)
 	apply_crater(contact, dent_radius, dent_depth)
 	_demolish_structures_near(contact, other)
-	collision_cooldown = 3.0
+	# Short enough that sustained contact keeps getting corrected (was 3.0,
+	# which let two bodies grind for seconds between corrections); still long
+	# enough that one impact doesn't fire twice in the same instant.
+	collision_cooldown = 0.5
 
 ## Shears off the buildings actually caught in the encounter - the ones on the
 ## hemisphere facing the other planet, within reach of its structures. Buildings

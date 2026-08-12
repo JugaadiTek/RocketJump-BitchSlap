@@ -117,6 +117,7 @@ const STRUCTURE_CLEARANCE_MARGIN: float = 2.0
 @export var jump_pad_bodies: Array[String] = ["Alpha", "Beta", "Ferrum", "Cobalt"]
 @export var tower_scene: PackedScene
 @export var bunker_scene: PackedScene
+@export var turret_scene: PackedScene
 @export var health_pack_scene: PackedScene
 
 @onready var orbit_center: Node3D = $OrbitCenter
@@ -295,10 +296,27 @@ func _fixed_separation_clearance(a: OrbitalBody, b: OrbitalBody) -> float:
 		return INF
 	return centre_distance - a.radius - b.radius - STRUCTURE_CLEARANCE_MARGIN
 
+## Tower when the site calls for one; otherwise a coin flip between Bunker
+## (squat, sealed) and Turret (short, stilted, open) so two non-tower plots
+## on the same planet don't default to identical silhouettes. Falls back
+## through whatever scenes are actually assigned rather than assuming all
+## three are wired up, the way the old two-way choice did.
+func _pick_building_scene(prefer_tower: bool) -> PackedScene:
+	if prefer_tower and tower_scene:
+		return tower_scene
+	var short_options: Array[PackedScene] = []
+	if bunker_scene:
+		short_options.append(bunker_scene)
+	if turret_scene:
+		short_options.append(turret_scene)
+	if not short_options.is_empty():
+		return short_options[randi() % short_options.size()]
+	return tower_scene
+
 ## Scatters a mix of structures over every body big enough to hold them, so
 ## each planet has cover to fight around and interiors to fight through.
-## Towers go on anything sizeable; small worlds get bunkers instead, where a
-## radius-tall tower would be a stub not worth entering.
+## Towers go on anything sizeable; small worlds get bunkers or turrets
+## instead, where a radius-tall tower would be a stub not worth entering.
 func _build_buildings() -> void:
 	var allowed_height: Dictionary = _solve_structure_heights()
 	for body_name in _bodies_by_name:
@@ -311,9 +329,7 @@ func _build_buildings() -> void:
 		var count: int = randi_range(1, 3) if body.radius >= 15.0 else 1
 		for i in range(count):
 			var prefer_tower: bool = body.radius >= 12.0 and height_budget >= 9.0 and (i == 0 or randf() < 0.6)
-			var scene: PackedScene = tower_scene if prefer_tower else bunker_scene
-			if scene == null:
-				scene = tower_scene if tower_scene else bunker_scene
+			var scene: PackedScene = _pick_building_scene(prefer_tower)
 			if scene == null:
 				return
 			var building: Node3D = scene.instantiate()
@@ -334,6 +350,9 @@ func _build_buildings() -> void:
 				# pebble would wrap most of the way round it.
 				building.bunker_width = clampf(body.radius * 0.8, 5.0, 11.0)
 				building.bunker_depth = building.bunker_width * 0.72
+			elif building is Turret:
+				building.leg_height = clampf(height_budget * 0.7, 2.2, 4.0)
+				building.platform_width = clampf(body.radius * 0.55, 4.5, 7.5)
 			# Lets the building work out how far the surface curves away beneath
 			# its flat base, so its foundation can fill that gap instead of
 			# leaving the outer corners hanging in the air.

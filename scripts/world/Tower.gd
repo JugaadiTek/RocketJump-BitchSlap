@@ -9,10 +9,12 @@ extends Building
 ##   - intermediate floors, each a slab with a corner opening for the ladder,
 ##     and a firing window on two sides for cover mid-climb
 ##   - a ladder running the full height through those corner openings
-##   - an observation deck capping it: wider than the tower below, with a
-##     waist-high parapet instead of full walls, so a defender can lean out
-##     over the overhang and fire straight down at the planet surface - a
-##     normal window only ever looked outward, never down.
+##   - an observation deck capping it: much wider than the tower below, with
+##     no walls or rail at all and a roof held up on inset corner pillars -
+##     nothing stands between a defender and the drop, so they can walk right
+##     to the overhanging edge and fire straight down at the planet surface,
+##     which a normal window never could since the tower's own walls were
+##     always directly underfoot.
 ##
 ## Interiors are hollow because every wall panel carries its own collision (see
 ## Building._add_box); a single tower-sized collision box would seal it shut.
@@ -21,11 +23,32 @@ extends Building
 @export var floor_count: int = 4          ## number of walkable floors
 @export var tower_width: float = 7.0
 
-## How much wider the observation deck is than the tower it caps.
-const DECK_WIDEN: float = 1.6
-## Tall enough to lean on and stop a player just walking off the edge, short
-## enough to shoot over without needing a window cutout.
-const PARAPET_HEIGHT: float = 1.1
+## Bigger than Building's inherited 2.4x1.8 default - a tower's windows are
+## firing positions during a climb, not just light sources, and the old size
+## read as a slit. Applied in _ready(), before Building._ready() calls
+## _build(), rather than as a re-exported default - GDScript doesn't allow a
+## subclass to redeclare an inherited @export var. Bunker, which shares the
+## same Cutout.WINDOW machinery, keeps Building's original size untouched.
+const TOWER_WINDOW_WIDTH: float = 3.6
+const TOWER_WINDOW_HEIGHT: float = 2.6
+
+func _ready() -> void:
+	window_width = TOWER_WINDOW_WIDTH
+	window_height = TOWER_WINDOW_HEIGHT
+	super._ready()
+
+## How much wider the observation deck is than the tower it caps - wide
+## enough that the overhang is unmistakable, not just a modest lip.
+const DECK_WIDEN: float = 2.4
+## Clear headroom from the deck floor to the underside of the roof - no
+## parapet at all (see _build_observation_deck), so this is the whole open
+## band a defender stands and shoots through. Doubled from the original
+## 1.9m open band a parapet used to cut into.
+const DECK_OPEN_HEIGHT: float = 3.8
+## Corner pillars are pulled in from the deck's own corner by this fraction,
+## so they read as supports set into the platform rather than posts hanging
+## off its edge.
+const PILLAR_INSET: float = 0.78
 
 func _build() -> void:
 	floor_count = maxi(floor_count, 2)
@@ -76,10 +99,12 @@ func _build() -> void:
 	# Plinth sinking the flat base into the curved surface.
 	_add_foundation(half, half)
 
-## Wider than the tower it caps and open overhead - the widening is what
-## clears a firing lane straight down past the tower's own base, which a
-## same-width top floor with windows never could no matter how the windows
-## were cut, since the tower's own walls were always directly underfoot.
+## Wider than the tower it caps - the widening is what clears a firing lane
+## straight down past the tower's own base, which a same-width top floor with
+## windows never could no matter how the windows were cut, since the tower's
+## own walls were always directly underfoot. No walls or rail at all - just
+## the deck floor and a roof on inset pillars - so nothing stands between a
+## defender and the drop; the whole edge is a firing/sight line straight down.
 func _build_observation_deck(floor_height: float, half: float, shaft_centre: Vector2, ladder_shaft: float) -> void:
 	var deck_y: float = tower_height - floor_height
 	var deck_half: float = half * DECK_WIDEN
@@ -90,17 +115,7 @@ func _build_observation_deck(floor_height: float, half: float, shaft_centre: Vec
 	# SAME xz on every level it passes through, so the deck needs its hole at
 	# shaft_centre specifically, not at the wider deck's own corner.
 	_add_deck_slab(deck_y, deck_half, shaft_centre, ladder_shaft)
-
-	# Waist-high parapet around the perimeter instead of full walls.
-	var rail_y: float = deck_y + floor_thickness * 0.5 + PARAPET_HEIGHT * 0.5
-	var walls := [
-		{"centre": Vector3(0.0, rail_y, deck_half), "axis": "x"},
-		{"centre": Vector3(0.0, rail_y, -deck_half), "axis": "x"},
-		{"centre": Vector3(deck_half, rail_y, 0.0), "axis": "z"},
-		{"centre": Vector3(-deck_half, rail_y, 0.0), "axis": "z"},
-	]
-	for w in walls:
-		_add_wall(w["centre"], deck_half * 2.0, PARAPET_HEIGHT, w["axis"], Cutout.NONE)
+	var deck_top: float = deck_y + floor_thickness * 0.5
 
 	# Corner posts under the deck's own corners (not the narrower tower's),
 	# so the overhang reads as built out and braced rather than floating.
@@ -113,8 +128,19 @@ func _build_observation_deck(floor_height: float, half: float, shaft_centre: Vec
 			_add_box(Vector3(sx * deck_half * 0.86, deck_y - brace_height * 0.5, sz * deck_half * 0.86),
 				Vector3(0.35, brace_height, 0.35), _tint * 0.8)
 
-	_add_interior_light(Vector3(0.0, deck_y + floor_thickness * 0.5 + 1.6, 0.0), floor_height * 2.2, 2.0)
-	_add_roof_flag(deck_y + floor_thickness * 0.5 + PARAPET_HEIGHT)
+	# Roof, held up by four pillars inset from the deck's own corners - no
+	# walls anywhere between the deck floor and the roof.
+	var roof_y: float = deck_top + DECK_OPEN_HEIGHT
+	var pillar_height: float = roof_y - deck_top
+	for sx in [-1.0, 1.0]:
+		for sz in [-1.0, 1.0]:
+			_add_box(Vector3(sx * deck_half * PILLAR_INSET, deck_top + pillar_height * 0.5, sz * deck_half * PILLAR_INSET),
+				Vector3(0.4, pillar_height, 0.4), _tint * 0.8)
+	_add_box(Vector3(0.0, roof_y + floor_thickness * 0.5, 0.0),
+		Vector3(deck_half * 2.0, floor_thickness, deck_half * 2.0), _tint * 0.82)
+
+	_add_interior_light(Vector3(0.0, deck_top + 1.4, 0.0), floor_height * 2.2, 2.0)
+	_add_roof_flag(roof_y + floor_thickness)
 
 ## Same two-rectangle hole trick as Building._add_slab_with_hole(), just
 ## generalised to four rectangles around an arbitrary hole centre instead of
@@ -161,9 +187,9 @@ func _add_roof_flag(base_y: float) -> void:
 func footprint_radius() -> float:
 	return tower_width * DECK_WIDEN * 0.7072
 
-## Deck top (its slab plus the parapet standing on it), matching where
-## _build_observation_deck() actually finishes now that there's no separate
-## roof cap above it.
+## Roof top - the deck slab, the open band up to the roof, and the roof's own
+## thickness, matching where _build_observation_deck() actually finishes.
 func structure_height() -> float:
 	var floor_height: float = tower_height / float(maxi(floor_count, 2))
-	return tower_height - floor_height + floor_thickness * 0.5 + PARAPET_HEIGHT
+	var deck_top: float = tower_height - floor_height + floor_thickness * 0.5
+	return deck_top + DECK_OPEN_HEIGHT + floor_thickness

@@ -1,4 +1,4 @@
-[gd_scene load_steps=13 format=3]
+[gd_scene load_steps=14 format=3]
 
 [ext_resource type="Script" path="res://scripts/world/Arena.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/world/OrbitalBody.tscn" id="2"]
@@ -11,6 +11,7 @@
 [ext_resource type="PackedScene" path="res://scenes/world/Tower.tscn" id="9"]
 [ext_resource type="PackedScene" path="res://scenes/world/Bunker.tscn" id="10"]
 [ext_resource type="PackedScene" path="res://scenes/world/HealthPack.tscn" id="11"]
+[ext_resource type="PackedScene" path="res://scenes/world/Turret.tscn" id="12"]
 
 [node name="Arena" type="Node3D"]
 script = ExtResource("1")
@@ -23,6 +24,7 @@ jump_pad_scene = ExtResource("7")
 tower_scene = ExtResource("9")
 bunker_scene = ExtResource("10")
 health_pack_scene = ExtResource("11")
+turret_scene = ExtResource("12")
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = ExtResource("6")

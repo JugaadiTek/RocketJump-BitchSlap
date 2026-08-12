@@ -384,11 +384,12 @@ func _distance_to_nearest_surface() -> float:
 ## Spawner, which flings them at a randomly chosen planet on the same trailed
 ## launch a respawn uses - no aim window, no choice.
 ##
-## "The edge" is GravityManager.is_within_boundary(): a box around whichever
-## planet is nearest, not a single sphere around the arena centre - so
-## drifting far from every planet counts as out of bounds even if that point
-## is still well inside the old arena-wide radius, which is what let players
-## camp in open space between worlds.
+## "The edge" is GravityManager.is_within_boundary(): a single box for the
+## whole arena, centred on the arena origin and sized to whichever planet
+## currently reaches furthest out (see arena_half_extent()) - it flexes as
+## orbits drift and planets are destroyed, but there is only ever the one
+## box. It does not shrink down around individual planets, so it never shows
+## up as a wall out in open space between two worlds.
 ##
 ## The previous version steered velocity itself and returned early, while
 ## _apply_movement ALSO returned early because a boundary target was set. Between
@@ -533,12 +534,27 @@ func _apply_flight_movement(up: Vector3, delta: float) -> void:
 
 ## ---- Ladders --------------------------------------------------------------
 ## Called by Ladder.gd as we enter/leave a building's climb volume.
+##
+## Also drops world/structure collision (layer 1) for the duration. The shaft
+## is a tight fit around the Ladder trigger volume, and a real corner sits
+## right where it meets the tower's outer walls (the walls run the tower's
+## full width; only the FLOOR SLABS get a hole cut for the shaft) - a
+## standing player's capsule brushing that corner mid-climb was catching on
+## it constantly. Climbing already suspends gravity and drives velocity
+## straight from input along the ladder's own axis (_apply_ladder_movement) -
+## it's a locked, directed motion, not free physics, so there's nothing for
+## world collision to usefully do here except snag on geometry the Ladder
+## volume itself already keeps you inside of. Only the world bit is touched,
+## not the whole mask, so it can't stomp on the "hits nothing but world"
+## mask _die() sets while a corpse is mid-respawn.
 func set_ladder(ladder: Node3D) -> void:
 	_ladder = ladder
+	collision_mask &= ~1
 
 func clear_ladder(ladder: Node3D) -> void:
 	if _ladder == ladder:
 		_ladder = null
+		collision_mask |= (_default_collision_mask & 1)
 
 func _is_on_ladder() -> bool:
 	if is_dead or _is_spawning():
