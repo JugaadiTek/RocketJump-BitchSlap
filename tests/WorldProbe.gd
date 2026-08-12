@@ -11,6 +11,7 @@ extends Node
 
 const ProbePlayer := preload("res://tests/ProbePlayer.gd")
 const ARENA := preload("res://scenes/world/Arena.tscn")
+const SpawnerScript := preload("res://scripts/player/Spawner.gd")
 const LOG_PATH := "/tmp/rjbs_world.log"
 
 var _arena: Node3D
@@ -52,6 +53,10 @@ func _ready() -> void:
 	await _test_crater_collider()
 	_test_curved_and_lit()
 	_test_decor()
+	await _test_tower_height_range()
+	await _test_planet_shader()
+	_test_boundary_vs_spawn()
+	await _test_ladder_death()
 	get_tree().quit()
 
 ## Bodies must not intersect, and nothing may sit outside the arena boundary.
@@ -381,3 +386,211 @@ func _test_decor() -> void:
 	var faceted: bool = GravityManager.get_bodies()[0].mesh.mesh is ArrayMesh
 	_log("DECOR   %d orbit rings, %d atmosphere shells, %d debris rocks, planets faceted=%s" % [
 		rings, shells, rocks, faceted])
+
+## NEW - Arena._build_buildings() now randomises tower_height between a
+## planet's radius (min) and its full circumference TAU*radius (max), instead
+## of the old fixed cap AT radius. Reports the observed range against that
+## ceiling, then specifically re-runs the hollow-interior and
+## ladder-climb-to-peak checks against the TALLEST tower generated (not just
+## "the first tower found", which the checks above use) - more floors and a
+## longer shaft is exactly the case most likely to expose something the
+## original fixed ~30m towers never could.
+func _test_tower_height_range() -> void:
+	var count: int = 0
+	var min_ratio: float = INF
+	var max_ratio: float = -INF
+	var over_ceiling: int = 0
+	var tallest: Tower = null
+	var tallest_host: OrbitalBody = null
+	for body in GravityManager.get_bodies():
+		for child in body.get_children():
+			if not (child is Tower):
+				continue
+			count += 1
+			var ratio: float = child.tower_height / body.radius
+			min_ratio = minf(min_ratio, ratio)
+			max_ratio = maxf(max_ratio, ratio)
+			if child.tower_height > TAU * body.radius + 0.01:
+				over_ceiling += 1
+			if tallest == null or child.tower_height > tallest.tower_height:
+				tallest = child
+				tallest_host = body
+	if count == 0:
+		_log("TOWERHEIGHT no towers found")
+		return
+	_log("TOWERHEIGHT %d towers; height/radius ratio observed %.2fx-%.2fx (ceiling is TAU=%.2fx); %d exceed the ceiling; tallest=%.0fm on %s (r%.0f)" % [
+		count, min_ratio, max_ratio, TAU, over_ceiling, tallest.tower_height, tallest_host.name, tallest_host.radius])
+	if tallest == null:
+		return
+
+	var space := get_viewport().world_3d.direct_space_state
+	var inside: Vector3 = tallest.global_transform * Vector3(0.0, 1.6, 0.0)
+	var query := PhysicsShapeQueryParameters3D.new()
+	var probe_shape := SphereShape3D.new()
+	probe_shape.radius = 0.35
+	query.shape = probe_shape
+	query.transform = Transform3D(Basis(), inside)
+	query.collision_mask = 1
+	var hollow: bool = space.intersect_shape(query, 1).is_empty()
+
+	var ladder: Ladder = null
+	for child in tallest.get_children():
+		if child is Ladder:
+			ladder = child
+	if ladder == null:
+		_log("TOWERHEIGHT tallest tower (%.0fm) interior clear=%s, has no ladder to verify climb" % [tallest.tower_height, hollow])
+		return
+
+	var scene: PackedScene = load("res://scenes/player/Player.tscn")
+	var player: Player = scene.instantiate()
+	player.set_script(ProbePlayer)
+	player.name = "TowerHeightProbe"
+	_arena.get_node("Players").add_child(player)
+	player.player_id = 97
+	await get_tree().physics_frame
+	player.disable_spawner()
+	var shaft_bottom: Vector3 = ladder.global_transform * Vector3(0.0, -ladder.get_child(0).shape.size.y * 0.5 + 1.0, 0.0)
+	player.global_position = shaft_bottom
+	player.reset_frame()
+	for i in range(20):
+		await get_tree().physics_frame
+	player.probe_move = Vector2(0.0, 1.0)
+	var peak: float = _local_height(player, tallest)
+	# A fixed 420-frame climb (the "first tower" test's budget) assumed a
+	# ~30m tower at ladder_climb_speed (4.5 m/s); scale climb time off the
+	# actual height/speed with a 30% margin so a much taller randomised
+	# tower gets a fair shot at actually reaching near its peak instead of
+	# the probe's own time budget being the thing that cuts it short.
+	var climb_frames: int = clampi(int(tallest.tower_height / player.ladder_climb_speed * 60.0 * 1.3), 420, 7200)
+	var progress: Array[String] = []
+	for i in range(climb_frames):
+		await get_tree().physics_frame
+		peak = maxf(peak, _local_height(player, tallest))
+		if i % 300 == 0:
+			progress.append("%.1fm@%s" % [_local_height(player, tallest), player._is_on_ladder()])
+	player.probe_move = Vector2.ZERO
+	_log("TOWERHEIGHT tallest tower (%.0fm, %d floors): interior clear=%s, ladder climbed to peak %.1fm (%.0f%% of height) over %d frames" % [
+		tallest.tower_height, tallest.floor_count, hollow, peak, 100.0 * peak / tallest.tower_height, climb_frames])
+	_log("TOWERHEIGHT climb progress (height@on_ladder every 300 frames) = [%s]" % ", ".join(progress))
+	player.queue_free()
+
+## NEW - planets now use a custom ShaderMaterial (planet_surface.gdshader,
+## hue-rotating edges) instead of StandardMaterial3D. Confirms every live
+## planet actually got one with a real colour, and that moon fragments
+## spawned by shatter() - which rebuild the ShaderMaterial from scratch and
+## have to re-apply the bump pattern on the new instance - come out coloured
+## too rather than bare/black.
+func _test_planet_shader() -> void:
+	var bodies: Array[OrbitalBody] = GravityManager.get_bodies()
+	var shader_count: int = 0
+	var bad: Array[String] = []
+	for body in bodies:
+		var mat: Material = body.mesh.get_surface_override_material(0)
+		if mat is ShaderMaterial:
+			var col: Variant = (mat as ShaderMaterial).get_shader_parameter("albedo_color")
+			if col is Color and (col as Color).a > 0.0 and (col as Color) != Color(0, 0, 0, 1):
+				shader_count += 1
+			else:
+				bad.append(body.name + "(no real albedo_color)")
+		else:
+			bad.append(body.name + "(not a ShaderMaterial)")
+	_log("PLANETSHADER %d/%d planets using planet_surface ShaderMaterial with a real albedo_color; problems=[%s]" % [
+		shader_count, bodies.size(), ", ".join(bad)])
+
+	var target: OrbitalBody = null
+	for body in bodies:
+		if not body.is_shattered and body.radius >= 8.0 and body.orbit_pivot != null:
+			target = body
+			break
+	if target == null:
+		_log("PLANETSHADER no shatterable body found to test fragment colour")
+		return
+	var frag_seen: Array = []
+	target.fragment_spawned.connect(func(f): frag_seen.append(f))
+	target.shatter(target.radius * 3.0, 99999.0)
+	for i in range(10):
+		await get_tree().physics_frame
+	var frag_ok: int = 0
+	for f in frag_seen:
+		if not is_instance_valid(f):
+			continue
+		var fmesh: MeshInstance3D = f.get_node_or_null("MeshInstance3D")
+		if fmesh == null:
+			continue
+		var fmat: Material = fmesh.get_surface_override_material(0)
+		if fmat is ShaderMaterial:
+			var col: Variant = (fmat as ShaderMaterial).get_shader_parameter("albedo_color")
+			if col is Color and (col as Color).a > 0.0 and (col as Color) != Color(0, 0, 0, 1):
+				frag_ok += 1
+	_log("PLANETSHADER shattered %s: %d fragments spawned, %d with a real (non-black/non-bare) ShaderMaterial colour" % [
+		target.name, frag_seen.size(), frag_ok])
+
+## NEW - a very tall randomised tower on the outermost planet directly
+## inflates GravityManager.arena_half_extent() (structure_reach feeds it).
+## Cross-checked against the fixed Spawner.SPAWN_RADIUS, which was chosen
+## once ("just inside ARENA_BOUNDARY_RADIUS, clear of Halcyon") and does not
+## itself adapt - if the flexing box now legitimately reaches past it, spawns
+## could land inside the play boundary near a planet instead of at the true
+## edge.
+func _test_boundary_vs_spawn() -> void:
+	var extent: float = GravityManager.arena_half_extent()
+	var spawn_radius: float = SpawnerScript.SPAWN_RADIUS
+	_log("BOUNDARYSPAWN arena_half_extent=%.0fm vs fixed Spawner.SPAWN_RADIUS=%.0fm -> spawn point is %s the flexing boundary box" % [
+		extent, spawn_radius, "INSIDE" if spawn_radius < extent else "outside/at the edge of"])
+
+## NEW - dying mid-ladder-climb never calls Ladder's own exit path
+## (clear_ladder()), since the player is hidden/collision-stripped by
+## _die()/_respawn() rather than walking out of the Area3D. Both _die() and
+## _respawn() unconditionally overwrite collision_mask wholesale (not just
+## OR/AND the world bit the way set_ladder()/clear_ladder() do), so that part
+## looks safe by inspection - but the `_ladder` reference itself is never
+## cleared, so this actually measures whether a stale reference to a
+## far-away ladder leaves _is_on_ladder() reporting true right after
+## respawn, which would wrongly apply ladder movement (gravity suspended,
+## velocity locked to the ladder axis) at the new spawn location.
+func _test_ladder_death() -> void:
+	var tower: Tower = null
+	for body in GravityManager.get_bodies():
+		for child in body.get_children():
+			if child is Tower and tower == null:
+				tower = child
+	if tower == null:
+		_log("LADDERDEATH no tower found to test")
+		return
+	var ladder: Ladder = null
+	for child in tower.get_children():
+		if child is Ladder:
+			ladder = child
+	if ladder == null:
+		_log("LADDERDEATH tower has no ladder")
+		return
+
+	var scene: PackedScene = load("res://scenes/player/Player.tscn")
+	var player: Player = scene.instantiate()
+	player.set_script(ProbePlayer)
+	player.name = "LadderDeathProbe"
+	player.display_name = "LadderDeathProbe"
+	_arena.get_node("Players").add_child(player)
+	player.player_id = 96
+	await get_tree().physics_frame
+	player.disable_spawner()
+
+	var shaft_bottom: Vector3 = ladder.global_transform * Vector3(0.0, -ladder.get_child(0).shape.size.y * 0.5 + 1.0, 0.0)
+	player.global_position = shaft_bottom
+	player.reset_frame()
+	player.probe_move = Vector2(0.0, 1.0)
+	for i in range(60):
+		await get_tree().physics_frame
+	var was_on_ladder: bool = player._is_on_ladder()
+	var mask_while_climbing: int = player.collision_mask
+
+	player.apply_damage(1000000.0, null, player.global_position, "probe")
+	for i in range(int(player.respawn_delay * 60.0) + 60):
+		await get_tree().physics_frame
+	var mask_after_respawn: int = player.collision_mask
+	var default_mask: int = player._default_collision_mask
+	var stale_on_ladder: bool = player._is_on_ladder()
+	player.probe_move = Vector2.ZERO
+	_log("LADDERDEATH was climbing (on_ladder=%s, mask=%d) -> killed -> after respawn: mask=%d matches default %d=%s, stale is_on_ladder=%s (should be false)" % [
+		was_on_ladder, mask_while_climbing, mask_after_respawn, default_mask, mask_after_respawn == default_mask, stale_on_ladder])
+	player.queue_free()

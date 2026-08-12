@@ -8,9 +8,12 @@ extends Node
 ## Run: Godot --headless --path . res://tests/WeaponProbe.tscn
 
 const ProbePlayer := preload("res://tests/ProbePlayer.gd")
+const ProbeLocalPlayer := preload("res://tests/ProbeLocalPlayer.gd")
 const ARENA := preload("res://scenes/world/Arena.tscn")
 const LOG_PATH := "/tmp/rjbs_weapons.log"
 
+const WEAPON_ROCKET := 0
+const WEAPON_RAILGUN := 1
 const WEAPON_GRAPPLE := 3
 const WEAPON_BOARD := 4
 
@@ -48,6 +51,9 @@ func _ready() -> void:
 	await _test_buster_shell()
 	await _test_third_person_weapon()
 	await _test_scope()
+	await _test_scope_highlight()
+	await _test_grapple_auto_melee()
+	await _test_slug_vs_tower()
 	_test_slug_gravity()
 	await _test_all_weapons_option()
 	get_tree().quit()
@@ -312,8 +318,197 @@ func _test_scope() -> void:
 	var has_shader: bool = hud.scope_overlay.material is ShaderMaterial
 	_log("SCOPE   overrides_aim_fov=%s | HUD overlay default=%s -> update_scope(true)=%s -> (false)=%s, blur shader attached=%s" % [
 		railgun.overrides_aim_fov(), default_visible, on, off, has_shader])
+	_log("SCOPE   scope_sensitivity_multiplier=%.4f (0.18 base * 1.3 retune = %.4f expected)" % [
+		railgun.scope_sensitivity_multiplier, 0.18 * 1.3])
 	hud.queue_free()
 	_player.probe_aim = false
+
+## NEW - scoping in should highlight every OTHER player bright red, but only
+## for the actual local human (Player._is_local_view()), never for a bot's
+## own AI-driven scope use sharing the same offline screen. Regular
+## ProbePlayer always reports local_view=false (matching Bot.gd), so this
+## needs ProbeLocalPlayer specifically to exercise the gated path at all.
+func _test_scope_highlight() -> void:
+	var scene: PackedScene = load("res://scenes/player/Player.tscn")
+
+	var local: Player = scene.instantiate()
+	local.set_script(ProbeLocalPlayer)
+	local.name = "HighlightLocal"
+	_arena.get_node("Players").add_child(local, true)
+	local.player_id = 201
+	await get_tree().physics_frame
+
+	var bystander: Player = scene.instantiate()
+	bystander.set_script(ProbePlayer)
+	bystander.name = "HighlightBystander"
+	_arena.get_node("Players").add_child(bystander, true)
+	bystander.player_id = 202
+	await get_tree().physics_frame
+
+	var remote_scoper: Player = scene.instantiate()
+	remote_scoper.set_script(ProbePlayer)
+	remote_scoper.name = "HighlightRemoteScoper"
+	_arena.get_node("Players").add_child(remote_scoper, true)
+	remote_scoper.player_id = 203
+	await get_tree().physics_frame
+
+	var base: Vector3 = _body.global_position + Vector3(0, _body.radius + 30.0, 0)
+	for p in [local, bystander, remote_scoper]:
+		p.disable_spawner()
+		p.global_position = base
+		p.velocity = Vector3.ZERO
+		p.reset_frame()
+	for i in range(10):
+		await get_tree().physics_frame
+
+	local.probe_switch = WEAPON_RAILGUN
+	remote_scoper.probe_switch = WEAPON_RAILGUN
+	for i in range(4):
+		await get_tree().physics_frame
+
+	# Local scopes in - bystander should light up.
+	local.probe_aim = true
+	for i in range(30):
+		await get_tree().physics_frame
+	var highlighted_while_scoped: bool = bystander._highlighted
+	local.probe_aim = false
+	for i in range(30):
+		await get_tree().physics_frame
+	var highlighted_after_release: bool = bystander._highlighted
+
+	# Re-scope, then switch weapons mid-scope (the on_holster path, not a
+	# plain release) - should also clear the highlight.
+	local.probe_aim = true
+	for i in range(30):
+		await get_tree().physics_frame
+	var highlighted_before_holster: bool = bystander._highlighted
+	local.probe_switch = WEAPON_ROCKET
+	for i in range(4):
+		await get_tree().physics_frame
+	var highlighted_after_holster: bool = bystander._highlighted
+	local.probe_aim = false
+
+	# A non-local scoper (stands in for a bot) should never highlight anyone.
+	remote_scoper.probe_aim = true
+	for i in range(30):
+		await get_tree().physics_frame
+	var highlighted_by_remote_scoper: bool = bystander._highlighted
+	remote_scoper.probe_aim = false
+
+	_log("HIGHLIGHT scope-in highlights bystander=%s -> release clears it=%s | before mid-scope holster=%s -> after=%s | non-local scoper ever highlights anyone=%s" % [
+		highlighted_while_scoped, not highlighted_after_release, highlighted_before_holster, highlighted_after_holster, highlighted_by_remote_scoper])
+
+	local.queue_free()
+	bystander.queue_free()
+	remote_scoper.queue_free()
+
+## NEW - reeling a hooked player all the way in (within 3m) should
+## auto-trigger the Bitchslap via Melee's own targeting, not just detach.
+func _test_grapple_auto_melee() -> void:
+	var scene: PackedScene = load("res://scenes/player/Player.tscn")
+	var shooter: Player = scene.instantiate()
+	shooter.set_script(ProbePlayer)
+	shooter.name = "GrappleShooter"
+	_arena.get_node("Players").add_child(shooter, true)
+	shooter.player_id = 211
+	await get_tree().physics_frame
+
+	var target: Player = scene.instantiate()
+	target.set_script(ProbePlayer)
+	target.name = "GrappleTarget"
+	target.display_name = "GrappleVictim"
+	_arena.get_node("Players").add_child(target, true)
+	target.player_id = 212
+	await get_tree().physics_frame
+
+	shooter.disable_spawner()
+	target.disable_spawner()
+	var base: Vector3 = _body.global_position + Vector3(0, _body.radius + 40.0, 0)
+	shooter.global_position = base
+	target.global_position = base + Vector3(0, 0, -12.0)
+	shooter.velocity = Vector3.ZERO
+	target.velocity = Vector3.ZERO
+	shooter.reset_frame()
+	target.reset_frame()
+	for i in range(10):
+		await get_tree().physics_frame
+
+	shooter.probe_switch = WEAPON_GRAPPLE
+	for i in range(4):
+		await get_tree().physics_frame
+	var hook: GrapplingHook = shooter.weapon_manager.get_active_weapon() as GrapplingHook
+	# fire()'s aim_direction is the camera's exact forward vector, used as-is
+	# from the MUZZLE's own origin (Weapon.gd: "independent of muzzle bob/sway") -
+	# the two rays are parallel, not converging, so aiming the camera straight
+	# at the target (aim_at(target)) actually sends the muzzle ray past it by
+	# whatever the muzzle's own offset from the camera is. Aim from the
+	# muzzle's position instead so the ray this weapon actually fires goes
+	# exactly through the target, the same correction a real player would make
+	# by adjusting for a visible offset-iron-sight/hip-fire weapon.
+	var muzzle_origin: Vector3 = shooter.get_muzzle_transform().origin
+	var to_target: Vector3 = (target.global_position - muzzle_origin).normalized()
+	shooter.aim_at(shooter.camera.global_position + to_target * 100.0)
+	shooter.probe_fire = true
+	var reeled_in: bool = false
+	var trace: Array[String] = []
+	for i in range(360):
+		await get_tree().physics_frame
+		if not is_instance_valid(target):
+			break
+		muzzle_origin = shooter.get_muzzle_transform().origin
+		to_target = (target.global_position - muzzle_origin).normalized()
+		shooter.aim_at(shooter.camera.global_position + to_target * 100.0)
+		var dist: float = target.global_position.distance_to(shooter.global_position)
+		if dist < 3.5:
+			reeled_in = true
+		if i % 30 == 0:
+			trace.append("%.1fm/state%d" % [dist, hook._hook_state if is_instance_valid(hook) else -1])
+		if target.is_dead:
+			break
+	shooter.probe_fire = false
+	var target_died: bool = is_instance_valid(target) and target.is_dead
+	_log("AUTOSLAP hook reeled target within melee range=%s | auto-triggered melee killed target=%s" % [
+		reeled_in, target_died])
+	_log("AUTOSLAP trace (distance/HookState 0=IDLE 1=FLYING 2=PULLING_SELF 3=PULLING_TARGET 4=RETRACTING, every 30 frames) = [%s]" % ", ".join(trace))
+
+	shooter.queue_free()
+	if is_instance_valid(target):
+		target.queue_free()
+
+## NEW - a slug in FLYING state only recognises a hit as "landed" (StaticBody3D
+## tagged with orbital_body meta) or "hit a player" (has_method("apply_damage")).
+## A Tower/Bunker/Turret's plain wall geometry matches neither, so a slug that
+## hits one is a candidate for silently going inert against the wall instead
+## of landing, damaging, or expiring cleanly.
+func _test_slug_vs_tower() -> void:
+	var tower: Tower = null
+	var host: OrbitalBody = null
+	for body in GravityManager.get_bodies():
+		for child in body.get_children():
+			if child is Tower and tower == null:
+				tower = child
+				host = body
+	if tower == null:
+		_log("SLUGTOWER no tower found to test")
+		return
+	var wall_global: Vector3 = tower.to_global(tower._surface_transform(Vector3(tower.tower_width * 0.5, 3.0, 0.0)).origin)
+	var outward: Vector3 = (wall_global - host.global_position).normalized()
+	var spawn: Vector3 = wall_global + outward * 5.0
+
+	var scene: PackedScene = load("res://scenes/weapons/Slug.tscn")
+	var slug: Slug = scene.instantiate()
+	get_tree().current_scene.add_child(slug)
+	slug.global_position = spawn
+	slug.velocity = (wall_global - spawn).normalized() * 20.0
+	for i in range(120):
+		await get_tree().physics_frame
+	var alive: bool = is_instance_valid(slug)
+	var state_after: String = "freed" if not alive else ("SLITHERING" if slug._state == Slug.State.SLITHERING else "FLYING")
+	var residual_speed: float = slug.velocity.length() if alive else -1.0
+	_log("SLUGTOWER slug fired straight at a tower wall: state after 2s = %s, still-alive=%s, residual speed=%.2f (FLYING+alive+near-zero speed means stuck against the wall, not landed/expired)" % [
+		state_after, alive, residual_speed])
+	if alive:
+		slug.queue_free()
 
 ## IMPROVEMENT - slugs fired from space fall into gravity wells much harder.
 func _test_slug_gravity() -> void:
