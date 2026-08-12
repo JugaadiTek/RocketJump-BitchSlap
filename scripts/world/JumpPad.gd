@@ -31,3 +31,4 @@ func _on_body_entered(body: Node3D) -> void:
 	_cooldowns[body] = retrigger_cooldown
 	var launch_dir: Vector3 = global_transform.basis.y.normalized()
 	body.apply_impulse(launch_dir * launch_speed)
+	Sfx.play_3d("jump_pad", global_position, 1.0, 0.0)

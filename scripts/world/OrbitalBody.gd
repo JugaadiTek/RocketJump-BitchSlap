@@ -15,8 +15,19 @@ signal fragment_spawned(fragment: OrbitalBody)
 @export var influence_radius: float = 220.0
 
 @export_group("Orbit")
-@export var orbit_pivot: Node3D
-@export var orbit_radius: float = 0.0
+## A moon fragment gets its pivot/radius assigned after it's already entered
+## the tree (see OrbitalBody._spawn_moon_fragments), which used to leave it
+## with no orbit ring at all - _add_orbit_ring() only ran once, from _ready(),
+## back when both were still unset. These setters make sure the ring gets
+## created (or moved/resized) whenever either value changes post-ready.
+@export var orbit_pivot: Node3D:
+	set(v):
+		orbit_pivot = v
+		_ensure_orbit_ring()
+@export var orbit_radius: float = 0.0:
+	set(v):
+		orbit_radius = v
+		_ensure_orbit_ring()
 ## Semi-minor axis: if 0, orbit is circular. Set to a fraction of orbit_radius
 ## (e.g. 0.6) for an ellipse. Perturb_orbit can drift this over time.
 @export var orbit_eccentricity: float = 0.0
@@ -60,6 +71,7 @@ const SURFACE_RINGS: int = 18
 var _atmosphere: MeshInstance3D = null
 var _orbit_ring: MeshInstance3D = null
 var _ring_drawn_radius: float = 0.0
+var _ring_drawn_axis: Vector3 = Vector3.UP
 var _collider_dirty: bool = false
 var _collider_rebuild_delay: float = COLLIDER_REBUILD_INTERVAL
 var _crater_arrays: Array = []
@@ -95,8 +107,24 @@ func _ready() -> void:
 	process_physics_priority = -10
 	_prev_global_transform = global_transform
 	_add_atmosphere_shell()
-	_add_orbit_ring()
+	_ensure_orbit_ring()
 	_rebuild_faceted_surface()
+
+## Creates the orbit ring if this body now has a valid pivot+radius and
+## doesn't already have one, or repositions the existing one otherwise. Called
+## both from _ready() and from the orbit_pivot/orbit_radius setters, since a
+## spawned moon fragment gets those assigned after it's already in the tree
+## (see _spawn_moon_fragments) - a single _ready()-time call would have missed
+## it and left the moon with no ring, ever.
+func _ensure_orbit_ring() -> void:
+	if not is_inside_tree():
+		return
+	if orbit_pivot == null or orbit_radius <= 0.01:
+		return
+	if _orbit_ring == null or not is_instance_valid(_orbit_ring):
+		_add_orbit_ring()
+	else:
+		_refresh_orbit_ring()
 
 ## Faint ring tracing this body's orbital path, the way the concept art draws
 ## every world on a visible track. Parented to the PIVOT rather than to us, so a
@@ -105,6 +133,8 @@ func _ready() -> void:
 func _add_orbit_ring() -> void:
 	if orbit_pivot == null or orbit_radius <= 0.01:
 		return
+	if _orbit_ring and is_instance_valid(_orbit_ring):
+		_orbit_ring.queue_free()
 	_orbit_ring = MeshInstance3D.new()
 	var ring := TorusMesh.new()
 	ring.rings = 96
@@ -136,6 +166,7 @@ func _refresh_orbit_ring() -> void:
 	var axis: Vector3 = orbit_axis.normalized()
 	_orbit_ring.transform = Transform3D(Basis(Quaternion(Vector3.UP, axis)), Vector3.ZERO)
 	_ring_drawn_radius = orbit_radius
+	_ring_drawn_axis = axis
 
 ## Thin emissive shell just above the surface, rendered inside-out so only the
 ## limb shows through - the atmospheric rim glow every planet has in the concept
@@ -161,6 +192,22 @@ func _add_atmosphere_shell() -> void:
 	_atmosphere.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_atmosphere)
 	_resize_atmosphere()
+
+## Hides the rim glow while anyone is actually standing on this body. From
+## orbit the shell reads as atmosphere; from the surface, with the camera
+## sitting inside/just past it, it's just a bright haze in your face. "On the
+## body" reuses Player's own planet-frame check (get_frame_body()) rather than
+## a second distance threshold, so the glow disappears exactly when the
+## player's movement frame switches to this planet.
+func _update_atmosphere_visibility() -> void:
+	if _atmosphere == null:
+		return
+	var occupied: bool = false
+	for player in get_tree().get_nodes_in_group("players"):
+		if is_instance_valid(player) and player.has_method("get_frame_body") and player.get_frame_body() == self:
+			occupied = true
+			break
+	_atmosphere.visible = not occupied
 
 func _resize_atmosphere() -> void:
 	var shell_mesh: SphereMesh = _atmosphere.mesh
@@ -295,9 +342,12 @@ func _physics_process(delta: float) -> void:
 		rotate(spin_axis.normalized(), spin_speed * delta)
 	if collision_cooldown > 0.0:
 		collision_cooldown -= delta
-	# Orbits drift on every spawn landing and jump on a structural collision;
-	# refresh the drawn ring once the difference would actually be visible.
-	if _orbit_ring and absf(orbit_radius - _ring_drawn_radius) > maxf(orbit_radius * 0.01, 0.25):
+	# Orbits drift on every spawn landing and jump/tilt on a structural
+	# collision; refresh the drawn ring once either the radius or the plane
+	# has moved enough to actually be visible. Axis alone (a tilt with radius
+	# unchanged) used to leave a stale ring, since only radius was watched.
+	if _orbit_ring and (absf(orbit_radius - _ring_drawn_radius) > maxf(orbit_radius * 0.01, 0.25)
+			or orbit_axis.normalized().dot(_ring_drawn_axis) < 0.9999):
 		_refresh_orbit_ring()
 	if _collider_dirty:
 		_collider_rebuild_delay -= delta
@@ -306,6 +356,7 @@ func _physics_process(delta: float) -> void:
 			_collider_rebuild_delay = COLLIDER_REBUILD_INTERVAL
 			_rebuild_collider()
 	_update_motion_delta(delta)
+	_update_atmosphere_visibility()
 
 ## Records a building's height so GravityManager knows how far this body's
 ## structures stick out when checking whether two planets are grinding together.
@@ -388,7 +439,19 @@ func structural_collision(other: OrbitalBody) -> void:
 	) * share).normalized()
 
 	var contact: Vector3 = global_position + (other.global_position - global_position).normalized() * radius
-	apply_crater(contact, clampf(radius * 0.3, 2.0, 12.0), clampf(radius * 0.1, 0.8, 4.0))
+	# The orbital kick above only resolves the overlap over the next several
+	# seconds as the two bodies drift apart; on the frame of impact their
+	# spheres can already be interpenetrating. Craters used to always be a
+	# small fixed size regardless, so a deep overlap still read as one planet
+	# poking visibly through the other. Scaling the dent (and its radius) with
+	# how far the spheres actually overlap makes each body carve away enough
+	# of its own facing hemisphere that, combined with the other body doing
+	# the same on its own call, the two surfaces clear each other.
+	var separation: float = global_position.distance_to(other.global_position)
+	var overlap: float = maxf((radius + other.radius) - separation, 0.0)
+	var dent_depth: float = clampf(overlap * 0.6 + radius * 0.04, 0.8, radius * 0.6)
+	var dent_radius: float = clampf(radius * 0.3 + overlap * 0.8, 2.0, radius * 0.9)
+	apply_crater(contact, dent_radius, dent_depth)
 	_demolish_structures_near(contact, other)
 	collision_cooldown = 3.0
 
@@ -412,23 +475,33 @@ func _demolish_structures_near(contact: Vector3, other: OrbitalBody) -> void:
 	# planet stops registering contacts it can no longer physically make.
 	structure_reach = tallest_left
 
-func shatter(blast_radius: float, blast_damage: float) -> void:
+## `instigator` credits whoever caused this - the Planet Buster's shooter, so
+## kills tied to the planet coming apart go on their scoreboard instead of
+## vanishing as an environmental kill. Null for causes with no shooter (e.g.
+## an orbit drifting past the arena boundary).
+func shatter(blast_radius: float, blast_damage: float, instigator: Node = null, weapon_name: String = "") -> void:
 	if is_shattered:
 		return
 	is_shattered = true
+	# Scaled by size: a moon cracks, a 44m world detonates.
+	Sfx.play_3d("planet_shatter", global_position, clampf(30.0 / maxf(radius, 1.0), 0.45, 1.6), 10.0, 0.05)
 	shattered.emit(self)
 	static_body.set_collision_layer_value(1, false)
 	static_body.set_collision_mask_value(1, false)
 	mesh.visible = false
 	_spawn_debris()
 	for node in get_tree().get_nodes_in_group("damageable"):
-		if not is_instance_valid(node):
+		if not is_instance_valid(node) or node == instigator:
 			continue
 		var dist: float = node.global_position.distance_to(global_position)
 		if dist <= blast_radius:
 			var falloff: float = 1.0 - (dist / blast_radius)
 			if node.has_method("apply_damage"):
-				node.apply_damage(blast_damage * falloff, self, global_position)
+				var dmg: float = blast_damage * falloff
+				if node.has_method("network_apply_damage") and not node.is_multiplayer_authority():
+					node.rpc_id(node.get_multiplayer_authority(), "network_apply_damage", dmg, instigator.get_path() if instigator else NodePath(), global_position, weapon_name)
+				else:
+					node.apply_damage(dmg, instigator, global_position, weapon_name)
 	_spawn_moon_fragments()
 	await get_tree().create_timer(4.0).timeout
 	GravityManager.unregister_body(self)

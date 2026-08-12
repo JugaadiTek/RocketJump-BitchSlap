@@ -89,7 +89,7 @@ func _on_hit(collider: Object, hit_position: Vector3, _hit_normal: Vector3) -> v
 	if collider is StaticBody3D and collider.has_meta("orbital_body"):
 		var body: OrbitalBody = collider.get_meta("orbital_body")
 		if is_instance_valid(body) and body.can_be_shattered:
-			body.shatter(planet_blast_radius, planet_blast_damage)
+			body.shatter(planet_blast_radius, planet_blast_damage, owner_player, "Planet Buster")
 		else:
 			_small_splash(hit_position)
 	else:

@@ -118,6 +118,7 @@ func demolish() -> void:
 	if _demolished:
 		return
 	_demolished = true
+	Sfx.play_3d("collapse", global_position, 1.0, 6.0)
 	_spawn_rubble()
 	# Collision first, so nothing is left standing invisibly in the way.
 	for child in _body.get_children():

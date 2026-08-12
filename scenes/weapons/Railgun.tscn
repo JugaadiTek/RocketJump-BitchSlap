@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://scripts/weapons/Railgun.gd" id="1"]
 
@@ -13,10 +13,18 @@ top_radius = 0.035
 bottom_radius = 0.04
 height = 0.22
 radial_segments = 12
+cap_top = false
+cap_bottom = false
 
 [sub_resource type="SphereMesh" id="SphereMesh_lens"]
 radius = 0.038
 height = 0.076
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_lens"]
+albedo_color = Color(0.55, 0.85, 1.0, 0.28)
+transparency = 1
+cull_mode = 2
+shading_mode = 0
 
 [node name="Railgun" type="Node3D"]
 script = ExtResource("1")
@@ -40,3 +48,4 @@ mesh = SubResource("CylinderMesh_scope")
 [node name="ScopeLens" type="MeshInstance3D" parent="ViewModel/Scope"]
 transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0.13, 0)
 mesh = SubResource("SphereMesh_lens")
+material_override = SubResource("StandardMaterial3D_lens")

@@ -7,6 +7,96 @@ in [`tests/`](../tests) — see **Test harness** at the bottom.
 
 ---
 
+## 2026-08-12 — Session 7: bug/feature sweep (scope, atmosphere, sound, kill credit, planet collision, orbit rings)
+
+Not yet run through the headless probes in this environment (no Godot binary
+available here) - review before trusting the "verified" bar the rest of this
+log holds itself to.
+
+### Bug: railgun scope blocked vision
+`ScopeTube` was a fully-capped `CylinderMesh` (Godot's default) sitting
+directly on the camera axis once scoped in - aiming down the sights meant
+staring at the inside of a solid tube, not looking through it. Removed both
+caps (`cap_top`/`cap_bottom = false`) so the barrel is actually hollow, and
+gave `ScopeLens` a translucent glass material instead of the opaque default so
+the objective lens doesn't itself paint over the view.
+[scenes/weapons/Railgun.tscn](../scenes/weapons/Railgun.tscn)
+
+### Improvement: atmosphere glow hides while you're on that planet
+`OrbitalBody._add_atmosphere_shell()`'s rim glow reads fine from orbit but is
+just a bright haze once you're standing on the surface looking through it.
+`_update_atmosphere_visibility()` now hides a body's shell while any player's
+movement frame is riding it (`Player.get_frame_body() == self` - reusing the
+existing hysteresis-guarded planet-frame check rather than adding a second,
+possibly-mismatched distance threshold). Added `Player.get_frame_body()` as
+the public accessor for `_frame_body`.
+[scripts/world/OrbitalBody.gd](../scripts/world/OrbitalBody.gd),
+[scripts/player/Player.gd](../scripts/player/Player.gd)
+
+### Restored: sound effects
+Session 6 reverted a big, eager sound system (Sfx + Ambience + Announcer, 21
+effects plus four 8-second ambience beds synthesised synchronously in
+`_ready()`) that cost Arena load 2+ seconds. That elaborate version has no
+git history - it only ever existed as uncommitted work - so it hasn't been
+rebuilt here. What's restored is the earlier, much smaller `Sfx` autoload
+(16 short one-shot weapon/world sounds, procedurally synthesised, no audio
+assets) that a separate, prior commit (`aa0ae64`) had dropped, plus its 16
+call sites across melee, movement, every weapon, health packs, jump pads,
+building collapse, planet shatter, and the main menu.
+
+Per the session-6 postmortem's own suggestion, synthesis is now **lazy**:
+each sound is built the first time it's actually played and cached from then
+on, instead of the whole library being built up front in `_ready()`. Startup
+pays nothing; the (much smaller, ~17s of audio total across 16 short one-shot
+sounds vs. the reverted system's ambience beds) cost lands on whatever the
+first jump/shot/pickup happens to be.
+[scripts/autoload/Sfx.gd](../scripts/autoload/Sfx.gd) (recreated),
+registered in [project.godot](../project.godot).
+
+### Bug: Planet Buster kills didn't credit the shooter
+`OrbitalBody.shatter()` passed `self` (the planet) as the damage instigator,
+so anyone killed by a planet's destruction got attributed to the environment
+rather than to whoever fired the buster - no scoreboard credit for what's
+supposed to be the biggest kill in the game. `shatter()` now takes an
+`instigator` (and `weapon_name`) parameter; `PlanetBusterProjectile._on_hit()`
+passes `owner_player`. Boundary-ejection shatters (no shooter) keep passing
+null, same as before. Also skips damaging the instigator themselves, matching
+the pattern already used for splash damage elsewhere.
+[scripts/world/OrbitalBody.gd](../scripts/world/OrbitalBody.gd),
+[scripts/weapons/PlanetBusterProjectile.gd](../scripts/weapons/PlanetBusterProjectile.gd)
+
+### Improvement: colliding planets actually deform to clear each other
+`structural_collision()`'s impact crater used to be a small fixed size
+regardless of how hard the two bodies were actually overlapping, so a deep
+graze still read as one planet visibly poking through the other while their
+orbits took several seconds to drift apart. The crater depth and radius now
+scale with the real penetration (`(radius + other.radius) - separation`), so
+each body carves away enough of its own facing hemisphere that, combined with
+the other body doing the same on its own call, the surfaces clear each other
+on the frame of impact instead of over time.
+[scripts/world/OrbitalBody.gd](../scripts/world/OrbitalBody.gd)
+
+### Bug: orbit rings not always updating
+Two separate causes:
+- The ring refresh in `_physics_process` only ever checked `orbit_radius`
+  drift, not `orbit_axis`. A structural collision tilts the orbital plane
+  (`orbit_axis`) without necessarily moving `orbit_radius` enough to cross
+  the refresh threshold, so a tilted orbit could keep its ring drawn on the
+  old, stale plane indefinitely. Now refreshes on either radius drift or an
+  axis change.
+- Moon fragments (`_spawn_moon_fragments()`) get `orbit_pivot`/`orbit_radius`
+  assigned *after* `add_child()`, i.e. after `_ready()` already ran and found
+  both unset - so `_add_orbit_ring()`'s guard clause bailed and the fragment
+  never got a ring at all, ever. `orbit_pivot` and `orbit_radius` are now
+  properties with setters that call `_ensure_orbit_ring()`, which creates the
+  ring the moment both are actually valid (and keeps it live afterward, since
+  every later `orbit_radius` write - `perturb_orbit()`,
+  `structural_collision()` - now refreshes it immediately too, rather than
+  waiting for the next physics tick's threshold check).
+[scripts/world/OrbitalBody.gd](../scripts/world/OrbitalBody.gd)
+
+---
+
 ## 2026-08-11 — Session 6: sound reverted, slime removed, performance pass
 
 ### Reverted: all sound

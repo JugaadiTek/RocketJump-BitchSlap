@@ -17,3 +17,4 @@ func _do_fire(muzzle_transform: Transform3D, aim_direction: Vector3) -> void:
 	_get_projectile_root().add_child(rocket)
 	rocket.global_position = muzzle_transform.origin
 	rocket.launch(aim_direction * rocket_speed, owner_player)
+	Sfx.play_3d("rocket_fire", muzzle_transform.origin, 1.0, 1.0)
