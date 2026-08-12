@@ -7,6 +7,75 @@ in [`tests/`](../tests) — see **Test harness** at the bottom.
 
 ---
 
+## 2026-08-13 — Session 17: railgun scope glass bug, Planet Buster guidance miss bug
+
+Two bugs off a fresh punch list, both root-caused and fixed at the actual
+source rather than papered over, each with a real Godot-binary repro before
+and after.
+
+### Fixed: translucent blue circle still blocking the railgun scope
+The blur/darken ring in `scope.gdshader` had already been removed in an
+earlier session, but a *second*, unrelated translucent blue disc remained:
+`ScopeLens`, a literal glass `SphereMesh` (`albedo_color` alpha 0.28,
+`cull_mode` disabled so both faces render) parented under
+`ViewModel/Scope` in [Railgun.tscn](../scenes/weapons/Railgun.tscn). Scoping
+in slides the whole viewmodel so the scope tube sits on the camera axis -
+which puts this glass sphere directly in front of the lens, fogging the
+entire view. `Railgun._handle_scope()` already hides every other viewmodel
+mesh (`_non_scope_parts`) while scoped, but the Scope node's own children
+were deliberately left alone so the tube read as "looking through the
+optic" - the lens sphere just wasn't supposed to be part of that. Now hidden
+alongside everything else while scoped (and restored on release/holster).
+[scripts/weapons/Railgun.gd](../scripts/weapons/Railgun.gd)
+
+Verified with `WeaponProbe`'s `_test_scope()`, extended to check the lens
+directly:
+```
+SCOPE   ScopeLens hidden while scoped=true | visible again after release=true
+```
+
+### Fixed: Planet Buster shell sometimes missing its locked planet
+Root cause: the shell recomputes its heading only once a second
+(`course_update_interval`), aimed with **pure pursuit** (straight at the
+target's *current* position, no lead) at whatever speed it happened to be
+going when the timer fired. Two compounding problems: (1) no lead meant the
+heading was already stale by the time the leg finished flying, worst on
+small fast-orbiting moons - `Cinder_Moon` (radius 3) combines its own ~10 m/s
+orbit with its parent `Cinder`'s own orbital motion for up to ~16 m/s of
+true world-space drift, several times its own radius, in a single second;
+(2) a close-range shot spends its *entire* first second uncorrected (the
+timer doesn't fire until t=1.0s), so a shell fired near a small moving
+target could fly its whole intercept before guidance ever got a second look.
+
+Reproduced for real: with a repro added to `WeaponProbe`
+(`_test_buster_intercept_moving_target`, close-range off-axis shots at
+`Cinder_Moon`/`Verdant_Moon`/`Cobalt`), the pre-fix code missed 1-2 of 4
+cases per run (`Cinder_Moon: MISS`, `Cobalt: MISS` seen across two runs).
+
+Fix, in [PlanetBusterProjectile.gd](../scripts/weapons/PlanetBusterProjectile.gd):
+- **Lead the target.** `OrbitalBody.get_point_velocity()` (already used to
+  carry players with a moving planet's surface) gives the target's true
+  world-space velocity; the new heading aims at `predicted_position =
+  target_pos + target_vel * time_to_intercept`, not the target's current spot.
+- **`time_to_intercept` from real kinematics**, not `distance / current_speed`
+  - the shell spends most of a close shot still accelerating off its slow
+    7 m/s muzzle velocity, so dividing by instantaneous speed alone
+    wildly over-predicted arrival time and over-led the target (aiming past
+    it on the far side). Solves `dist = v0*t + 0.5*a*t²` for `t` instead.
+- **Terminal guidance.** Inside `max(target.radius * 4, 50.0)` units,
+  correction switches from the once-a-second timer to every physics frame,
+  closing the exact window that let a close-range shot go the whole flight
+  unguided. Long shots (the Umbra repro: 150m out, radius 27) still recompute
+  on the original once-a-second cadence outside that radius, so the
+  intentional kinked flight-path look is unchanged at real engagement range.
+
+Re-ran the same repro post-fix: **3/3 hit**, repeatably. Existing
+`_test_buster_shell` long-range case unaffected (`heading recomputed at:
+[1.00s]`, struck Umbra at 2.80s, same as before the change).
+[tests/WeaponProbe.gd](../tests/WeaponProbe.gd)
+
+---
+
 ## 2026-08-13 — Session 16: multiplayer join fix attempted - real bug fixed, but NOT the one blocking connections
 
 Follow-up to Session 15, asked to fix what was found there. Two distinct
@@ -1371,7 +1440,7 @@ rather than pass/fail, so regressions show up as changed numbers.
 
 ```
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path . res://tests/MovementProbe.tscn   # bounce / slide / invisible wall
-/Applications/Godot.app/Contents/MacOS/Godot --headless --path . res://tests/WeaponProbe.tscn     # hook, board, buster, scope, slugs, menu option, scope highlight, auto-slap, slug vs. building
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path . res://tests/WeaponProbe.tscn     # hook, board, buster, buster intercept vs. moving target, scope, scope lens visibility, slugs, menu option, scope highlight, auto-slap, slug vs. building
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path . res://tests/WorldProbe.tscn      # layout, buildings, ladders, spawn, craters, health, spin, impacts, tower height range, planet shader, boundary vs. spawn, ladder death
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path . res://tests/CombatProbe.tscn     # boundary, tower walls, headshots, death/gore, slime, asteroids, audio, announcements
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path . res://tests/AIProbe.tscn          # bot AI raycast cost, GravityManager call cost, uncoalesced deform, skull texture, scoreboard sort (Session 12)

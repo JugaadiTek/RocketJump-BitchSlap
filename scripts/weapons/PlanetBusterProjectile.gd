@@ -85,19 +85,77 @@ func _steer(delta: float) -> void:
 	if _course_dir.length_squared() < 0.0001:
 		_course_dir = velocity.normalized() if velocity.length() > 0.01 else -global_transform.basis.z
 
+	var target_valid: bool = lock_target != null and is_instance_valid(lock_target) and not lock_target.is_shattered
+
+	# Terminal guidance: the once-a-second re-aim is what gives long-range
+	# flight its visible kinked path, but locking a heading a full second out
+	# let a moving target - especially a small, fast-orbiting moon like
+	# Cinder_Moon (radius 3, ~10-16 m/s combining its own orbit with its
+	# already-orbiting parent's) - drift clear of its own radius before the
+	# next scheduled correction ever landed, so the shell sailed past and
+	# expired or splashed on nothing. This was the "sometimes misses planets"
+	# bug. A shot fired at close range starts this uncorrected: the very
+	# first heading is whatever the player was aiming at the moment of lock,
+	# and nothing re-checks it until the first full course_update_interval
+	# has elapsed - so a nearby, fast target can already be missed and moving
+	# away again before guidance ever gets a second look. The fix is a wide,
+	# generous proximity radius (not tied to the current, possibly-still-slow
+	# closing speed) that switches to continuous (every physics frame)
+	# course correction well before the shell could plausibly reach the
+	# target, so there's no window for an uncorrected close-range pass.
+	var terminal: bool = false
+	if target_valid:
+		var dist: float = global_position.distance_to(lock_target.global_position)
+		terminal = dist < maxf(lock_target.radius * 4.0, 50.0)
+
 	_course_timer -= delta
-	if _course_timer <= 0.0:
+	if terminal or _course_timer <= 0.0:
 		_course_timer = course_update_interval
-		if lock_target != null and is_instance_valid(lock_target) and not lock_target.is_shattered:
-			var to_target: Vector3 = lock_target.global_position - global_position
-			if to_target.length_squared() > 0.0001:
-				_course_dir = to_target.normalized()
+		if target_valid:
+			_course_dir = _lead_direction_to_target()
 
 	var speed: float = min(velocity.length() + acceleration * delta, max_speed)
 	velocity = _course_dir * speed
 	# Keep the shell's mesh pointing where it's actually going.
 	if speed > 0.01:
 		look_at(global_position + _course_dir, Vector3.UP if absf(_course_dir.dot(Vector3.UP)) < 0.99 else Vector3.RIGHT)
+
+## Aims at where the target WILL be when the shell arrives, not where it is
+## right now - a pure-pursuit heading (old behaviour) systematically lags a
+## moving target by one whole course_update_interval of its own travel,
+## which is exactly what let small/fast-orbiting bodies dodge a "locked on"
+## shot. get_point_velocity() already combines orbital travel and
+## self-rotation for any world point, so the same call used to move players
+## with the ground under them works here to predict the body's centre.
+func _lead_direction_to_target() -> Vector3:
+	var target_vel: Vector3 = lock_target.get_point_velocity(lock_target.global_position)
+	var to_target: Vector3 = lock_target.global_position - global_position
+	var time_to_intercept: float = _estimate_arrival_time(to_target.length())
+	var predicted: Vector3 = lock_target.global_position + target_vel * time_to_intercept
+	var lead_dir: Vector3 = predicted - global_position
+	return lead_dir.normalized() if lead_dir.length_squared() > 0.0001 else to_target.normalized()
+
+## How long the shell itself will take to cover `dist` at its own constant
+## acceleration, starting from its current speed - solving
+## dist = v0*t + 0.5*a*t^2 for t, rather than just dist/current_speed. The
+## shell spends most of a close-range shot still speeding up (7 m/s at the
+## muzzle, ramping toward max_speed at 24 m/s^2), so dividing by the
+## instantaneous speed alone hugely overestimates time-to-arrival early in
+## the flight, which over-leads the target and can throw the aim out past it
+## on the far side instead of short of it.
+func _estimate_arrival_time(dist: float) -> float:
+	if dist <= 0.01:
+		return 0.0
+	var v0: float = velocity.length()
+	if acceleration <= 0.001:
+		return dist / maxf(v0, 1.0)
+	# Quadratic solve for dist = v0*t + 0.5*a*t^2, assuming the acceleration
+	# holds the whole way (it's exact until max_speed is hit, an overestimate
+	# past that - fine, since a shell that far out gets another correction
+	# well before it matters). Clamped to a sane ceiling so a near-stationary
+	# shell against a very distant target doesn't produce a wild lead.
+	var disc: float = v0 * v0 + 2.0 * acceleration * dist
+	return clampf((sqrt(maxf(disc, 0.0)) - v0) / acceleration, 0.0, course_update_interval * 6.0)
 
 func _on_hit(collider: Object, hit_position: Vector3, _hit_normal: Vector3) -> void:
 	if _exploded:

@@ -43,6 +43,13 @@ var _scope_ads_offset: Vector3 = Vector3.ZERO
 var _base_sensitivity: float = 0.0025
 ## Everything in the viewmodel except the scope itself - hidden while scoped.
 var _non_scope_parts: Array[MeshInstance3D] = []
+## The scope's own glass, a translucent sphere. Looks right sitting on the
+## tube from outside (hipfire/third-person), but once scoped the viewmodel
+## slides it right onto the camera axis, where a translucent disc this close
+## to the lens just fogs the whole view - so it hides for the scoped duration
+## same as the rest of the viewmodel, leaving the screen-space scope.gdshader
+## overlay as the only "looking through glass" effect.
+var _scope_lens: MeshInstance3D = null
 
 func _ready() -> void:
 	super._ready()
@@ -64,6 +71,7 @@ func _ready() -> void:
 		for child in _view_model.get_children():
 			if child is MeshInstance3D:
 				_non_scope_parts.append(child)
+	_scope_lens = get_node_or_null("ViewModel/Scope/ScopeLens")
 	var p: Player = owner_player as Player
 	if p:
 		_base_sensitivity = p.mouse_sensitivity
@@ -177,6 +185,8 @@ func _handle_scope(_fire_held: bool) -> void:
 			_scope_ads_offset if _scope_active else Vector3.ZERO, t)
 	for part in _non_scope_parts:
 		part.visible = not _scope_active
+	if _scope_lens:
+		_scope_lens.visible = not _scope_active
 
 	if _scope_active != was_active:
 		_highlight_other_players(p, _scope_active)
@@ -214,6 +224,8 @@ func on_holster() -> void:
 		_view_model.position = Vector3.ZERO
 	for part in _non_scope_parts:
 		part.visible = true
+	if _scope_lens:
+		_scope_lens.visible = true
 	if p:
 		p.mouse_sensitivity = _base_sensitivity
 

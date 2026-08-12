@@ -49,6 +49,7 @@ func _ready() -> void:
 	await _test_board()
 	await _test_buster_lock_gate()
 	await _test_buster_shell()
+	await _test_buster_intercept_moving_target()
 	await _test_third_person_weapon()
 	await _test_scope()
 	await _test_scope_highlight()
@@ -269,6 +270,55 @@ func _test_buster_shell() -> void:
 		_log("BUSTER  shell still in flight after 15s (did not reach target)")
 
 
+## BUGFIX - the shell used to aim with pure pursuit and only re-aim once a
+## second, so a small, fast-orbiting body could drift clear of its own radius
+## between corrections and the shot would sail past. Fires one shell each at
+## four small/fast bodies (three of them moons orbiting an already-orbiting
+## parent, so their true world-space speed is well above what their own
+## orbit_speed*orbit_radius alone suggests) from an off-axis angle, like a
+## human's aim, and checks every one actually connects. A real hit shatters
+## its target, so each case gets its own body rather than reusing one.
+func _test_buster_intercept_moving_target() -> void:
+	var scene: PackedScene = load("res://scenes/weapons/PlanetBusterProjectile.tscn")
+	# Ferrum deliberately excluded - it's where _place_on_surface() stands the
+	# probe player, and shattering the ground out from under it corrupts every
+	# test that runs after this one.
+	var cases: Array[Dictionary] = [
+		{"path": "OrbitalBodies/Cinder_Moon", "offset": Vector3(1, 0.2, 0.3).normalized() * 35.0, "askew_deg": 30.0},
+		{"path": "OrbitalBodies/Verdant_Moon", "offset": Vector3(-1, 0.1, 0.4).normalized() * 45.0, "askew_deg": 30.0},
+		{"path": "OrbitalBodies/Cobalt", "offset": Vector3(0.3, -0.2, 1).normalized() * 40.0, "askew_deg": 30.0},
+	]
+	var hits: int = 0
+	var results: Array[String] = []
+	for c in cases:
+		var target: OrbitalBody = _arena.get_node(c["path"])
+		if not is_instance_valid(target) or target.is_shattered:
+			results.append("%s: SKIPPED (already gone)" % c["path"])
+			continue
+		var shell: PlanetBusterProjectile = scene.instantiate()
+		get_tree().current_scene.add_child(shell)
+		var offset: Vector3 = c["offset"]
+		shell.global_position = target.global_position + offset
+		var straight: Vector3 = -offset.normalized()
+		# Deliberately a little off-axis, like a human's aim would be.
+		var askew: Vector3 = straight.rotated(offset.cross(Vector3.UP).normalized(), deg_to_rad(c["askew_deg"]))
+		shell.lock_target = target
+		shell.launch(askew * 7.0, null)
+		for frame in range(600):
+			await get_tree().physics_frame
+			if not is_instance_valid(shell):
+				break
+		# Ground truth is whether the target actually shattered, not just
+		# whether the shell object went away - it also disappears on a plain
+		# expire/out-of-bounds miss, which would otherwise misreport as a hit.
+		var hit: bool = is_instance_valid(target) and target.is_shattered
+		if hit:
+			hits += 1
+		results.append("%s: %s" % [target.name, "HIT" if hit else "MISS"])
+		if is_instance_valid(shell):
+			shell.queue_free()
+	_log("BUSTER  intercept-vs-moving-target: %d/%d hit | %s" % [hits, cases.size(), ", ".join(results)])
+
 ## IMPROVEMENT - everyone can see what gun everyone else is holding.
 func _test_third_person_weapon() -> void:
 	await _place_on_surface()
@@ -305,6 +355,27 @@ func _test_scope() -> void:
 	var in_camera: Vector3 = _player.camera.global_transform.affine_inverse() * scope_node.global_position
 	_log("SCOPE   scoped=%s fov %.0f -> %.0f | viewmodel %.2f -> %.2f | lens offset from camera axis = (%.3f, %.3f)" % [
 		railgun.is_scoped(), hip_fov, scoped_fov, rest_offset.x, scoped_offset.x, in_camera.x, in_camera.y])
+	# BUGFIX - the ScopeLens glass sphere used to stay visible while scoped,
+	# sitting right on the camera axis and fogging the whole view with a
+	# translucent blue disc. It should hide for the scoped duration, same as
+	# the rest of the viewmodel, and come back once un-scoped.
+	var lens: MeshInstance3D = railgun.get_node("ViewModel/Scope/ScopeLens")
+	var lens_hidden_while_scoped: bool = not lens.visible
+	_player.probe_aim = false
+	# Wait for the weapon to actually report un-scoped rather than a fixed
+	# frame count - is_aiming/tick() ordering can leave one boundary frame
+	# where the flag hasn't propagated yet, which a short fixed wait can
+	# occasionally land on and misreport as a stuck-hidden lens.
+	for i in range(120):
+		await get_tree().physics_frame
+		if not railgun.is_scoped():
+			break
+	var lens_visible_after_unscope: bool = lens.visible
+	_log("SCOPE   ScopeLens hidden while scoped=%s | visible again after release=%s" % [
+		lens_hidden_while_scoped, lens_visible_after_unscope])
+	_player.probe_aim = true
+	for i in range(60):
+		await get_tree().physics_frame
 	# The probe player is not a local view, so it never builds a HUD. Check the
 	# overlay wiring against a HUD instance directly instead.
 	var hud: CanvasLayer = load("res://scenes/ui/HUD.tscn").instantiate()
