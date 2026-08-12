@@ -421,16 +421,24 @@ func _test_grapple_auto_melee() -> void:
 	target.player_id = 212
 	await get_tree().physics_frame
 
-	shooter.disable_spawner()
-	target.disable_spawner()
-	var base: Vector3 = _body.global_position + Vector3(0, _body.radius + 40.0, 0)
-	shooter.global_position = base
-	target.global_position = base + Vector3(0, 0, -12.0)
-	shooter.velocity = Vector3.ZERO
-	target.velocity = Vector3.ZERO
+	# Grounded, not floating in open gravity - a free-floating pair drifts
+	# apart under real gravity over the several seconds a pull can take,
+	# which chases the test's own aim correction all over the sky instead of
+	# testing the feature. Standing on a planet, facing each other, is also
+	# the realistic case (grapple-then-slap is a close-quarters combo).
+	var out: Vector3 = Vector3(0.3, 1.0, 0.2).normalized()
+	var fwd: Vector3 = out.cross(Vector3.RIGHT).normalized()
+	var tangent: Vector3 = out.cross(-fwd).normalized()
+	for p in [shooter, target]:
+		p.disable_spawner()
+		p.velocity = Vector3.ZERO
+	shooter.global_position = _body.global_position + out * (_body.radius + 1.2)
+	target.global_position = shooter.global_position + tangent * 10.0
+	shooter.global_transform.basis = Basis(out.cross(-fwd).normalized(), out, -fwd).orthonormalized()
+	target.global_transform.basis = Basis(out.cross(fwd).normalized(), out, fwd).orthonormalized()  # facing shooter
 	shooter.reset_frame()
 	target.reset_frame()
-	for i in range(10):
+	for i in range(60):
 		await get_tree().physics_frame
 
 	shooter.probe_switch = WEAPON_GRAPPLE
@@ -450,6 +458,7 @@ func _test_grapple_auto_melee() -> void:
 	shooter.aim_at(shooter.camera.global_position + to_target * 100.0)
 	shooter.probe_fire = true
 	var reeled_in: bool = false
+	var ever_pulled: bool = false
 	var trace: Array[String] = []
 	for i in range(360):
 		await get_tree().physics_frame
@@ -461,15 +470,25 @@ func _test_grapple_auto_melee() -> void:
 		var dist: float = target.global_position.distance_to(shooter.global_position)
 		if dist < 3.5:
 			reeled_in = true
-		if i % 30 == 0:
+		var pulling: bool = is_instance_valid(hook) and hook._hook_state == GrapplingHook.HookState.PULLING_TARGET
+		if pulling:
+			ever_pulled = true
+		if i % 15 == 0:
 			trace.append("%.1fm/state%d" % [dist, hook._hook_state if is_instance_valid(hook) else -1])
 		if target.is_dead:
 			break
+		# Stop as soon as the first pull attempt has fully resolved (retracted
+		# back to IDLE after having pulled) rather than holding fire for the
+		# whole budget and letting it auto-refire and chase a target that may
+		# have moved - one full attempt is what the test is measuring.
+		if ever_pulled and is_instance_valid(hook) and hook._hook_state == GrapplingHook.HookState.IDLE:
+			break
 	shooter.probe_fire = false
 	var target_died: bool = is_instance_valid(target) and target.is_dead
-	_log("AUTOSLAP hook reeled target within melee range=%s | auto-triggered melee killed target=%s" % [
-		reeled_in, target_died])
-	_log("AUTOSLAP trace (distance/HookState 0=IDLE 1=FLYING 2=PULLING_SELF 3=PULLING_TARGET 4=RETRACTING, every 30 frames) = [%s]" % ", ".join(trace))
+	var melee_cooldown_after: float = shooter.melee._cooldown_remaining if shooter.melee else -1.0
+	_log("AUTOSLAP hook ever entered PULLING_TARGET=%s, reeled within melee range=%s | auto-triggered melee killed target=%s | shooter.melee cooldown after=%.2fs (>0 means try_activate() found and grabbed a target; 0 means every call whiffed Melee's own range/cone re-check)" % [
+		ever_pulled, reeled_in, target_died, melee_cooldown_after])
+	_log("AUTOSLAP trace (distance/HookState 0=IDLE 1=FLYING 2=PULLING_SELF 3=PULLING_TARGET 4=RETRACTING, every 15 frames) = [%s]" % ", ".join(trace))
 
 	shooter.queue_free()
 	if is_instance_valid(target):

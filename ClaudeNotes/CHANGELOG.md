@@ -7,6 +7,77 @@ in [`tests/`](../tests) — see **Test harness** at the bottom.
 
 ---
 
+## 2026-08-13 — Session 12: full performance + feature audit (no fixes applied)
+
+Audit only, requested end-to-end: rank every system's real runtime cost and
+exercise weapons/navigation for bugs. Everything below is a fresh measurement
+from this session, not a re-statement of Session 11's numbers, taken with the
+same real binary (`x:\Godot_v4.7-stable_win64.exe`) - headless for the
+gameplay probes, real D3D12/RTX 3060 renderer for `PerfProbe`/`LoadProbe`.
+Deliberately **no gameplay code was changed** - only `tests/` gained
+permanent new coverage (`AIProbe.gd`, new checks in `WeaponProbe.gd` and
+`WorldProbe.gd`, a worst-case tower timing in `LoadProbe.gd`,
+`ProbeLocalPlayer.gd`) so these numbers and checks can be re-run and diffed
+by whoever picks up the findings next. Full tables (performance, ranked
+descending, with recommendations; bugs, with repro) are in the published
+audit artifact rather than duplicated here in full - see the two
+highest-value findings below.
+
+### Confirmed: Session 11's tower-height change is the dominant cost, independently reproduced
+`PerfProbe -- sustained` today: mean 8.80ms (114fps), p95 21.62ms, 169/2400
+frames over 20ms - matches Session 11's own "~9-10ms, spikes far more
+variable" note, not a fluke. `LoadProbe` extended with a worst-case sample
+(a tower built at the new ceiling, `TAU * radius`, on the biggest live
+planet): **187ms for one tower vs 8.9-10.4ms for the old fixed 30m sample -
+an 18x cost per tower that happens to roll near the top of the range.**
+[tests/PerfProbe.gd](../tests/PerfProbe.gd), [tests/LoadProbe.gd](../tests/LoadProbe.gd)
+
+### Bug: climbing a very tall tower's ladder stalls partway up
+Built `WorldProbe._test_tower_height_range()` to specifically climb the
+TALLEST tower generated (137m on a 36m-radius planet, this run) rather than
+"the first tower found" (which prior tower/ladder checks always picked, and
+which is normally short). Result: the climb reaches 43.6m and stops for
+good - `_is_on_ladder()` goes false at that height and never recovers, even
+with 2380 frames (10x the original 420-frame budget) of held climb input.
+The stall height lines up closely with `Player.planet_frame_height` (26m)
+times its own release hysteresis (1.4x = 36.4m) - climbing back out past the
+altitude where the planet stops being the movement reference frame is the
+leading theory, not confirmed by a code fix. A 21m tower in the same run
+climbs cleanly to its top with no issue, so this is specific to the new
+height range, not a pre-existing ladder bug. Not fixed here - flagged for
+whoever picks this up, with the repro now a permanent regression check.
+[tests/WorldProbe.gd](../tests/WorldProbe.gd)
+
+### Also new in `tests/`, not yet a bug fix
+- `BOUNDARYSPAWN`: `GravityManager.arena_half_extent()` now measures
+  656-658m against a live tall tower, past the fixed `Spawner.SPAWN_RADIUS`
+  (505m, chosen "clear of Halcyon" back when nothing reached that far) -
+  spawns can now land inside the actual flexing play boundary instead of at
+  its edge.
+- `SLUGTOWER`: a slug fired straight at a Tower wall goes inert (stays
+  `FLYING`, alive, near-zero speed) instead of landing, hitting, or expiring
+  - `Slug._process_flying()` only recognises a hit tagged `orbital_body` or a
+    damageable collider; plain building geometry is neither.
+- `HIGHLIGHT`, `LADDERDEATH`, `PLANETSHADER`: all verified working correctly
+  (scope enemy-highlight on/off/holster/local-gating; ladder-death
+  collision-mask restore; shattered-planet fragment colouring) - included in
+  the artifact as clean passes, not just failures.
+- `AUTOSLAP`: the grapple-triggered Bitchslap's own trigger condition
+  (`GrapplingHook`'s `<3.0m` check) fired every time across several
+  point-blank pulls in a controlled grounded test, but `Melee`'s own
+  range/cone re-check whiffed every single one (`melee._cooldown_remaining`
+  stayed 0.00s throughout) - the code's own comment already accepts an
+  out-of-cone no-op as possible, so this isn't necessarily a bug, but a 100%
+  whiff rate across repeated clean pulls is worth a human playtest to see if
+  it feels broken.
+[tests/AIProbe.gd](../tests/AIProbe.gd) (new),
+[tests/ProbeLocalPlayer.gd](../tests/ProbeLocalPlayer.gd) (new),
+[tests/WeaponProbe.gd](../tests/WeaponProbe.gd),
+[tests/WorldProbe.gd](../tests/WorldProbe.gd),
+[tests/LoadProbe.gd](../tests/LoadProbe.gd)
+
+---
+
 ## 2026-08-12 — Session 11: planet shader rework, tower height overhaul, railgun scope polish, auto-slap
 
 Verified against the same real Godot 4.7 binary Session 10 found
@@ -968,15 +1039,19 @@ Measured on an identical seeded world:
 
 ## Test harness
 
-Three probe scenes drive the real code paths headless and print measurements
+Probe scenes drive the real code paths headless and print measurements
 rather than pass/fail, so regressions show up as changed numbers.
 
 ```
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path . res://tests/MovementProbe.tscn   # bounce / slide / invisible wall
-/Applications/Godot.app/Contents/MacOS/Godot --headless --path . res://tests/WeaponProbe.tscn     # hook, board, buster, scope, slugs, menu option
-/Applications/Godot.app/Contents/MacOS/Godot --headless --path . res://tests/WorldProbe.tscn      # layout, buildings, ladders, spawn, craters, health, spin, impacts
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path . res://tests/WeaponProbe.tscn     # hook, board, buster, scope, slugs, menu option, scope highlight, auto-slap, slug vs. building
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path . res://tests/WorldProbe.tscn      # layout, buildings, ladders, spawn, craters, health, spin, impacts, tower height range, planet shader, boundary vs. spawn, ladder death
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path . res://tests/CombatProbe.tscn     # boundary, tower walls, headshots, death/gore, slime, asteroids, audio, announcements
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path . res://tests/AIProbe.tscn          # bot AI raycast cost, GravityManager call cost, uncoalesced deform, skull texture, scoreboard sort (Session 12)
 ```
+
+`PerfProbe.tscn` and `LoadProbe.tscn` (see Session 6/12 above) need a real
+renderer, not `--headless`.
 
 Results are also written to `/tmp/rjbs_*.log`, flushed per line — a run that has
 to be killed for hanging would otherwise lose everything to stdout buffering.
