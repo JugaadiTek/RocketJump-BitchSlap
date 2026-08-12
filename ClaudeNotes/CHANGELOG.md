@@ -74,6 +74,33 @@ Re-ran the same repro post-fix: **3/3 hit**, repeatably. Existing
 [1.00s]`, struck Umbra at 2.80s, same as before the change).
 [tests/WeaponProbe.gd](../tests/WeaponProbe.gd)
 
+### Improvement: dramatic bitchslap hand animation
+`Melee.gd`'s own docstring already called out the windup/slap/slam state
+machine as "clean hook points to trigger animations... without touching the
+logic" - nothing had actually used them yet. Added a first-person hand
+viewmodel (`MeleeViewModel`, three primitive `BoxMesh`es - forearm, palm,
+thumb - nested under `WeaponManager` in
+[Player.tscn](../scenes/player/Player.tscn) so it inherits the same
+"hidden for anyone who isn't this exact camera" behaviour every weapon
+viewmodel already gets from `Player._ready()`, for free). `Melee.gd` tweens
+it through a pulled-back windup, a hard fast throw across the view for the
+slap, and a short overshoot/settle on impact, timed off the same
+`windup_time`/`slap_time`/`slam_time` export vars that already drive the
+state machine so retuning those can't desync the animation from it. A small
+one-shot camera-position kick lands on the exact hit frame for extra weight
+(nothing else drives `Camera3D.position`, so it can't fight the look system).
+All of it is gated on `Player.is_first_person_view()` - a bot's own AI-driven
+slap, or another human's slap on a different screen, never shows a hand here,
+matching how weapon fire already only animates for its own shooter.
+[scripts/melee/Melee.gd](../scripts/melee/Melee.gd),
+[scenes/player/Player.tscn](../scenes/player/Player.tscn)
+
+Verified with a new `WeaponProbe._test_melee_hand_animation`:
+```
+MELEEANIM local attacker: hidden at rest=true -> visible+moved during windup=true (moved=true) -> hidden again after full sequence=true | victim killed=true | remote (non-local) attacker's hand ever visible here=false
+```
+[tests/WeaponProbe.gd](../tests/WeaponProbe.gd)
+
 ---
 
 ## 2026-08-13 — Session 16: multiplayer join fix attempted - real bug fixed, but NOT the one blocking connections

@@ -33,6 +33,26 @@ var state: State = State.IDLE
 @onready var _player: Player = get_parent()
 var _cooldown_remaining: float = 0.0
 
+## First-person hand model, a plain child of WeaponManager (see Player.tscn) -
+## nesting it there means it's automatically hidden for non-local views the
+## same way every weapon viewmodel already is (Player._ready() hides
+## WeaponManager wholesale for anyone who isn't looking through this exact
+## camera), without Melee needing to duplicate that check itself.
+@onready var _view_model: Node3D = _player.get_node_or_null("Head/Camera3D/WeaponManager/MeleeViewModel")
+
+## Local-space poses the hand tweens through: pulled back for the windup,
+## thrown hard across and through the view for the slap itself, then a short
+## overshoot/settle on impact before it's hidden again. Numbers are hand-fit
+## against the viewmodel's own scale (see Player.tscn's BoxMesh_slap_* sizes),
+## not derived from anything - purely "does this read as a big haymaker".
+const _REST_POS := Vector3(0.32, -0.34, -0.18)
+const _WINDUP_POS := Vector3(0.5, 0.22, 0.08)
+const _WINDUP_ROT := Vector3(-0.35, 0.95, -0.3)
+const _SLAP_POS := Vector3(-0.42, -0.06, -0.62)
+const _SLAP_ROT := Vector3(0.15, -0.9, 0.35)
+const _SLAM_POS := Vector3(-0.16, -0.22, -0.7)
+const _SLAM_ROT := Vector3(0.3, -0.55, 0.1)
+
 func _process(delta: float) -> void:
 	if _cooldown_remaining > 0.0:
 		_cooldown_remaining -= delta
@@ -79,6 +99,7 @@ func _find_target() -> Player:
 	return best
 
 func _run_sequence(target: Player) -> void:
+	_animate_hand()
 	state = State.WINDUP
 	await get_tree().create_timer(windup_time).timeout
 	state = State.SLAP
@@ -88,9 +109,47 @@ func _run_sequence(target: Player) -> void:
 	await get_tree().create_timer(slam_time).timeout
 	state = State.IDLE
 
+## Fire-and-forget swing, run purely on the attacker's own first-person view
+## (the same way weapon fire/reload never animates for anyone else - other
+## players only ever see the result, the replicated corpse launch in
+## _resolve_hit). Timed to line up with the windup/slap/slam durations above
+## rather than driven by the state enum directly, so it can't drift out of
+## sync with _run_sequence even if a designer retunes those export vars.
+func _animate_hand() -> void:
+	if _view_model == null or not _player.is_first_person_view():
+		return
+	_view_model.visible = true
+	_view_model.position = _REST_POS
+	_view_model.rotation = Vector3.ZERO
+	var tw: Tween = create_tween()
+	tw.tween_property(_view_model, "position", _WINDUP_POS, windup_time).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(_view_model, "rotation", _WINDUP_ROT, windup_time).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	# The slap itself: thrown hard and fast, the whole point being violent.
+	tw.tween_property(_view_model, "position", _SLAP_POS, slap_time).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_IN)
+	tw.parallel().tween_property(_view_model, "rotation", _SLAP_ROT, slap_time).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_IN)
+	tw.tween_property(_view_model, "position", _SLAM_POS, slam_time).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(_view_model, "rotation", _SLAM_ROT, slam_time).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_callback(func() -> void:
+		if is_instance_valid(_view_model):
+			_view_model.visible = false)
+
+## A small, brief camera kick right on impact - nothing else drives
+## Camera3D.position (look is all done through Head's rotation and the
+## camera's own FOV), so nudging it here for a couple of frames and tweening
+## it back can't fight any other system.
+func _camera_punch() -> void:
+	if not _player.is_first_person_view() or _player.camera == null:
+		return
+	var cam: Camera3D = _player.camera
+	var rest: Vector3 = Vector3.ZERO
+	cam.position = Vector3(0.0, -0.06, 0.05)
+	var tw: Tween = create_tween()
+	tw.tween_property(cam, "position", rest, 0.16).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+
 func _resolve_hit(target: Player) -> void:
 	if not is_instance_valid(target) or target.is_dead:
 		return
+	_camera_punch()
 
 	var forward: Vector3 = _player.get_look_direction()
 	var attacker_up: Vector3 = _player.up_direction

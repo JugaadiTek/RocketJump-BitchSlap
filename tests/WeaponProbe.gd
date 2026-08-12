@@ -53,6 +53,7 @@ func _ready() -> void:
 	await _test_third_person_weapon()
 	await _test_scope()
 	await _test_scope_highlight()
+	await _test_melee_hand_animation()
 	await _test_grapple_auto_melee()
 	await _test_slug_vs_tower()
 	_test_slug_gravity()
@@ -472,6 +473,83 @@ func _test_scope_highlight() -> void:
 	local.queue_free()
 	bystander.queue_free()
 	remote_scoper.queue_free()
+
+## IMPROVEMENT - the bitchslap now swings a real first-person hand model
+## through windup/slap/slam, visible only on the attacker's own local view -
+## same "viewmodel, not everyone else's screen" rule every weapon already
+## follows (see MeleeViewModel nested under WeaponManager in Player.tscn, and
+## Player._ready() hiding WeaponManager wholesale for non-local views).
+func _test_melee_hand_animation() -> void:
+	var scene: PackedScene = load("res://scenes/player/Player.tscn")
+
+	var local_attacker: Player = scene.instantiate()
+	local_attacker.set_script(ProbeLocalPlayer)
+	local_attacker.name = "MeleeAnimLocal"
+	_arena.get_node("Players").add_child(local_attacker, true)
+	local_attacker.player_id = 221
+	await get_tree().physics_frame
+
+	var remote_attacker: Player = scene.instantiate()
+	remote_attacker.set_script(ProbePlayer)
+	remote_attacker.name = "MeleeAnimRemote"
+	_arena.get_node("Players").add_child(remote_attacker, true)
+	remote_attacker.player_id = 222
+	await get_tree().physics_frame
+
+	var victim_a: Player = scene.instantiate()
+	victim_a.set_script(ProbePlayer)
+	victim_a.name = "MeleeAnimVictimA"
+	_arena.get_node("Players").add_child(victim_a, true)
+	victim_a.player_id = 223
+	await get_tree().physics_frame
+
+	var victim_b: Player = scene.instantiate()
+	victim_b.set_script(ProbePlayer)
+	victim_b.name = "MeleeAnimVictimB"
+	_arena.get_node("Players").add_child(victim_b, true)
+	victim_b.player_id = 224
+	await get_tree().physics_frame
+
+	var base: Vector3 = _body.global_position + Vector3(0, _body.radius + 30.0, 0)
+	for p in [local_attacker, remote_attacker, victim_a, victim_b]:
+		p.disable_spawner()
+		p.global_position = base
+		p.velocity = Vector3.ZERO
+		p.reset_frame()
+	for i in range(10):
+		await get_tree().physics_frame
+
+	var hand: Node3D = local_attacker.get_node("Head/Camera3D/WeaponManager/MeleeViewModel")
+	var hidden_before: bool = not hand.visible
+
+	local_attacker.melee.try_activate(victim_a)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	var visible_during_windup: bool = hand.visible
+	var displaced_during_windup: bool = hand.position.length() > 0.05
+
+	var total: float = local_attacker.melee.windup_time + local_attacker.melee.slap_time + local_attacker.melee.slam_time
+	var settle_frames: int = int(total * 60.0) + 30
+	for i in range(settle_frames):
+		await get_tree().physics_frame
+	var hidden_after: bool = not hand.visible
+	var victim_a_killed: bool = victim_a.is_dead
+
+	# A non-local attacker (stands in for a bot's own slap) must never show
+	# its hand to this screen.
+	var remote_hand: Node3D = remote_attacker.get_node("Head/Camera3D/WeaponManager/MeleeViewModel")
+	remote_attacker.melee.try_activate(victim_b)
+	for i in range(settle_frames):
+		await get_tree().physics_frame
+	var remote_hand_ever_shown: bool = remote_hand.visible
+
+	_log("MELEEANIM local attacker: hidden at rest=%s -> visible+moved during windup=%s (moved=%s) -> hidden again after full sequence=%s | victim killed=%s | remote (non-local) attacker's hand ever visible here=%s" % [
+		hidden_before, visible_during_windup, displaced_during_windup, hidden_after, victim_a_killed, remote_hand_ever_shown])
+
+	local_attacker.queue_free()
+	remote_attacker.queue_free()
+	victim_a.queue_free()
+	victim_b.queue_free()
 
 ## NEW - reeling a hooked player all the way in (within 3m) should
 ## auto-trigger the Bitchslap via Melee's own targeting, not just detach.

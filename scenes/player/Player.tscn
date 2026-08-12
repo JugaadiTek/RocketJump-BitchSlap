@@ -1,4 +1,4 @@
-[gd_scene load_steps=22 format=3]
+[gd_scene load_steps=25 format=3]
 
 [ext_resource type="Script" path="res://scripts/player/Player.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/player/WeaponManager.gd" id="2"]
@@ -62,6 +62,15 @@ rings = 6
 albedo_color = Color(0.82, 0.78, 0.72, 1)
 roughness = 0.6
 
+[sub_resource type="BoxMesh" id="BoxMesh_slap_forearm"]
+size = Vector3(0.14, 0.14, 0.56)
+
+[sub_resource type="BoxMesh" id="BoxMesh_slap_palm"]
+size = Vector3(0.24, 0.06, 0.24)
+
+[sub_resource type="BoxMesh" id="BoxMesh_slap_thumb"]
+size = Vector3(0.07, 0.15, 0.08)
+
 [node name="Player" type="CharacterBody3D"]
 collision_layer = 2
 collision_mask = 3
@@ -112,6 +121,24 @@ slug_launcher_scene = ExtResource("6")
 planet_buster_scene = ExtResource("7")
 space_board_scene = ExtResource("9")
 grappling_hook_scene = ExtResource("10")
+
+[node name="MeleeViewModel" type="Node3D" parent="Head/Camera3D/WeaponManager"]
+visible = false
+
+[node name="Forearm" type="MeshInstance3D" parent="Head/Camera3D/WeaponManager/MeleeViewModel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.26)
+mesh = SubResource("BoxMesh_slap_forearm")
+surface_material_override/0 = SubResource("StandardMaterial3D_head")
+
+[node name="Palm" type="MeshInstance3D" parent="Head/Camera3D/WeaponManager/MeleeViewModel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.58)
+mesh = SubResource("BoxMesh_slap_palm")
+surface_material_override/0 = SubResource("StandardMaterial3D_head")
+
+[node name="Thumb" type="MeshInstance3D" parent="Head/Camera3D/WeaponManager/MeleeViewModel"]
+transform = Transform3D(1, 0, 0, 0, 0.7, -0.7, 0, 0.7, 0.7, 0.14, 0.03, -0.5)
+mesh = SubResource("BoxMesh_slap_thumb")
+surface_material_override/0 = SubResource("StandardMaterial3D_head")
 
 [node name="Melee" type="Node" parent="."]
 script = ExtResource("3")
