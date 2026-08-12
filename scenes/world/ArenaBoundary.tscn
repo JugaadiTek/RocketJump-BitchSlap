@@ -3,11 +3,8 @@
 [ext_resource type="Script" path="res://scripts/world/ArenaBoundary.gd" id="1"]
 [ext_resource type="Shader" path="res://scenes/world/arena_boundary.gdshader" id="2"]
 
-[sub_resource type="SphereMesh" id="SphereMesh_1"]
-radius = 950.0
-height = 1900.0
-radial_segments = 64
-rings = 32
+[sub_resource type="BoxMesh" id="BoxMesh_1"]
+size = Vector3(1900, 1900, 1900)
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_1"]
 shader = ExtResource("2")
@@ -20,6 +17,6 @@ shader_parameter/glitch_speed = 3.0
 shader_parameter/glitch_amount = 0.25
 
 [node name="ArenaBoundary" type="MeshInstance3D"]
-mesh = SubResource("SphereMesh_1")
+mesh = SubResource("BoxMesh_1")
 surface_material_override/0 = SubResource("ShaderMaterial_1")
 script = ExtResource("1")

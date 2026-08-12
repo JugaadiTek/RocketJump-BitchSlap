@@ -7,6 +7,107 @@ in [`tests/`](../tests) — see **Test harness** at the bottom.
 
 ---
 
+## 2026-08-12 — Session 9: adaptive boundary, observation decks, ladder curvature, bump map rework
+
+Not yet run through the headless probes in this environment (no Godot binary
+available here) - review before trusting the "verified" bar the rest of this
+log holds itself to.
+
+### Improvement: the arena boundary is now a box around the nearest planet
+Replaced the single fixed sphere (`ARENA_BOUNDARY_RADIUS`, centred on the
+arena origin) with `GravityManager.is_within_boundary()`: a point counts as
+in-bounds if it's within `BOUNDARY_MARGIN` (50m) of *any* body's own extents
+(radius + however far its structures reach) on every axis - a box around
+whichever planet is nearest, not a sphere around the whole arena. A player
+only gets pushed back once they've drifted clear of every planet's box, which
+closes off the dead space between worlds that let people camp there waiting
+out the old, much larger sphere. `Player._apply_arena_bounds()` now checks
+this instead of `global_position.length() <= ARENA_BOUNDARY_RADIUS`.
+`ArenaBoundary.gd`'s shell is no longer a static sphere either - it's a
+`BoxMesh` that resizes and repositions every frame to wrap whichever planet
+the LOCAL viewer is nearest to (`GravityManager.find_local_viewer()`, the
+same local-only pattern Session 8 used for the atmosphere glow fix - see
+below). `ARENA_BOUNDARY_RADIUS` itself is unchanged and still used exactly
+where it always was: ejecting a planet whose own orbit has drifted past the
+whole arena's edge.
+[scripts/autoload/GravityManager.gd](../scripts/autoload/GravityManager.gd),
+[scripts/player/Player.gd](../scripts/player/Player.gd),
+[scripts/world/ArenaBoundary.gd](../scripts/world/ArenaBoundary.gd),
+[scenes/world/ArenaBoundary.tscn](../scenes/world/ArenaBoundary.tscn)
+
+### Improvement: projectiles are destroyed at the boundary
+A shot that missed everything used to just sail on until its own `lifetime`
+timer ran out (up to 12s later) for no gameplay reason. `Projectile.gd`
+(and `Slug.gd`, which overrides `_physics_process` and needed the same
+check) now destroys itself once past `ARENA_BOUNDARY_RADIUS`.
+
+Deliberately the WHOLE-arena sphere, not the new tighter per-planet box
+above: a Planet Buster shell is *supposed* to cross open space between two
+planets that can be hundreds of metres apart, well outside either one's 50m
+box, for most of its flight - the box would have destroyed every long-range
+shot on the way to its target. Since real shots are fired from one in-bounds
+position toward another, and a sphere is convex, a shot between two legal
+points never leaves the big sphere either, so this only ever actually
+catches a shot that misses everything and flies off into true dead space.
+Trimmed `WeaponProbe._test_buster_shell()`'s synthetic 400-unit offset to
+150 - the old value could place its (deliberately off-course, for testing
+steering) spawn point past 535 from the arena centre depending on direction,
+which would now destroy the test shell on its own first frame.
+[scripts/weapons/Projectile.gd](../scripts/weapons/Projectile.gd),
+[scripts/weapons/Slug.gd](../scripts/weapons/Slug.gd),
+[tests/WeaponProbe.gd](../tests/WeaponProbe.gd)
+
+### New: tower observation decks
+The top storey used to be just another same-width floor with windows on all
+four sides - you could only ever shoot outward, never down, because the
+tower's own walls were always directly underfoot. `Tower.gd` now caps each
+tower with a deck 1.6x wider than the tower below, ringed by a waist-high
+parapet (`PARAPET_HEIGHT`, shoot-over height) instead of full walls, with no
+roof overhead - standing at the wider edge clears a firing lane straight down
+past the tower's own base to the planet surface. Corner posts under the
+deck's own corners keep the overhang from reading as floating.
+`footprint_radius()`/`structure_height()` updated to measure the deck (the
+wider, and now topmost, part) rather than the old roof cap.
+`Building._add_slab_with_hole()` always cuts its ladder hole at the slab's
+own corner, which is only correct for the tower's own (narrower) floors - a
+new `_add_deck_slab()` cuts the hole at the ladder's actual shaft position
+instead, so the shaft lines up through the wider deck the same way it does
+through every floor below it.
+[scripts/world/Tower.gd](../scripts/world/Tower.gd)
+
+### Bug: ladder rails drifting from their own rungs
+`Building._surface_transform()` scales the angle-per-metre of horizontal
+offset down as height increases (`arc / height_radius`), which is what keeps
+every storey the same physical width instead of fanning wider near the top -
+see Session 6. Every OTHER tall element gets this correction per-segment
+because it's rebuilt per floor, but a ladder's rails were each authored as
+ONE tall box spanning the full climb in a single `_add_box()` call, computed
+from one `_surface_transform()` at the box's own midpoint - so the entire
+rail rendered dead straight at a single angle while the individually-placed
+rungs (each getting their own correctly height-scaled angle) subtly bowed
+away from it, worse the taller the tower. Rails are now built from the same
+short segments as the rungs (`RUNG_SPACING`), so both go through the
+identical per-height transform and stay aligned all the way up.
+[scripts/world/Building.gd](../scripts/world/Building.gd)
+
+### Fix: planet surface material - actually triangular, bigger, embossed
+The bump-map pattern added last session summed three overlapping triangle
+waves into a smooth height field - continuous by construction, so it had no
+actual edges anywhere and read as a moire-ish wobble rather than triangles.
+Rebuilt around distance-to-nearest-grid-line instead: for each pixel, the
+distance to the nearest of three line families (running along u, v, and
+u+v - still the same exactly-tileable triangular lattice construction) is
+turned into a thin raised ridge via `smoothstep`, leaving each triangular
+cell's interior flat - an embossed border rather than a smooth dome. Also
+turned the repeat rate down hard (`BUMP_TILE_FREQ` x `BUMP_TILE_REPEAT` was
+6 x 26 = 156 triangle-periods around a planet, now 3 x 9 = 27) so individual
+triangles are actually large enough to read as triangles up close instead of
+blurring into fine noise, and raised `normal_scale` from 0.35 to 0.75 since
+an embossed edge needs to actually look raised.
+[scripts/world/OrbitalBody.gd](../scripts/world/OrbitalBody.gd)
+
+---
+
 ## 2026-08-12 — Session 8: bug/feature sweep #2 (gravity, asteroid batching, orbit ring spin, buster self-hit, bump map, atmosphere scope, sound gain)
 
 Not yet run through the headless probes in this environment (no Godot binary

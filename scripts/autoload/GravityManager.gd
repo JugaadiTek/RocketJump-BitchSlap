@@ -17,12 +17,17 @@ extends Node
 const DEEP_SPACE_PULL: float = 0.6
 const DEEP_SPACE_MAX_DISTANCE: float = 420.0
 
-## Hard edge of playable space, measured from the arena center (world
-## origin). Beyond this, Player._apply_arena_bounds() fires a strong push
-## back toward the nearest planet, and ArenaBoundary.gd's shell becomes
-## visible nearby. Comfortably past the outermost body (Halcyon: orbit_radius
-## 440 + radius 36 = 476 max reach).
+## Hard edge of the WHOLE arena, measured from the arena center (world
+## origin) - used only to eject a planet whose orbit has drifted this far out
+## (see OrbitalBody._check_boundary()). Comfortably past the outermost body
+## (Halcyon: orbit_radius 440 + radius 36 = 476 max reach).
 const ARENA_BOUNDARY_RADIUS: float = 535.0
+
+## How far past a body's own extents (radius + however far its structures
+## reach) a player/projectile can still drift and count as "in bounds". Used
+## by is_within_boundary() - see there for why this replaced a single
+## arena-wide sphere.
+const BOUNDARY_MARGIN: float = 50.0
 
 var _bodies: Array[OrbitalBody] = []
 ## Last frame's separation per body pair, so a structural collision only counts
@@ -117,3 +122,45 @@ func get_nearest_body(global_pos: Vector3) -> OrbitalBody:
 			nearest_dist = d
 			nearest = body
 	return nearest
+
+## True if `pos` sits within BOUNDARY_MARGIN of at least one body's own
+## extents (its radius, plus however far its structures stick out) on every
+## axis - an axis-aligned box around that body rather than a sphere. A point
+## only counts as out of bounds once it has drifted clear of every planet's
+## box, so the legal play space follows wherever the planets actually are
+## instead of a single fixed-radius sphere around the arena centre, which let
+## players park in dead space far from any world and just wait the boundary
+## push out.
+func is_within_boundary(pos: Vector3) -> bool:
+	for body in _bodies:
+		if not is_instance_valid(body) or body.is_shattered:
+			continue
+		var half: float = body.radius + body.structure_reach + BOUNDARY_MARGIN
+		var local: Vector3 = pos - body.global_position
+		if absf(local.x) <= half and absf(local.y) <= half and absf(local.z) <= half:
+			return true
+	return false
+
+## The nearest body's box (see is_within_boundary), for anything that wants to
+## visualise or reason about that specific box rather than just a yes/no
+## check - the boundary shell uses this to size and position itself.
+func nearest_boundary_box(pos: Vector3) -> Dictionary:
+	var body: OrbitalBody = get_nearest_body(pos)
+	if body == null:
+		return {}
+	var half: float = body.radius + body.structure_reach + BOUNDARY_MARGIN
+	return {"body": body, "half_extent": half}
+
+## The human sitting at this screen - the single Player with
+## is_first_person_view() true, or null (offline bot-only matches, a
+## dedicated host with no local player). For purely-local rendering decisions
+## that have no reason to be shared/networked state, since every client
+## already runs its own independent copy of the world - the arena boundary
+## shell and OrbitalBody's atmosphere glow both use this rather than reacting
+## to "any player", which used to make them flicker based on bots elsewhere
+## that had nothing to do with what the person watching was actually doing.
+func find_local_viewer() -> Player:
+	for player in get_tree().get_nodes_in_group("players"):
+		if is_instance_valid(player) and player is Player and (player as Player).is_first_person_view():
+			return player
+	return null

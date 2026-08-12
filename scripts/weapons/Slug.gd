@@ -58,6 +58,14 @@ func _physics_process(delta: float) -> void:
 	if _life_remaining <= 0.0:
 		_expire()
 		return
+	# Past the arena's outer edge - see Projectile._physics_process for why
+	# this is the whole-arena sphere and not the tighter per-planet box. A
+	# SLITHERING slug is always glued to the surface of whatever it landed on
+	# so this only ever actually bites during FLYING, but checking
+	# unconditionally is cheap and keeps this in sync with the base class.
+	if global_position.length() > GravityManager.ARENA_BOUNDARY_RADIUS:
+		_expire()
+		return
 	match _state:
 		State.FLYING:
 			_process_flying(delta)

@@ -225,8 +225,12 @@ func _test_buster_shell() -> void:
 	var shell: PlanetBusterProjectile = scene.instantiate()
 	get_tree().current_scene.add_child(shell)
 	# Launch from well outside the target, deliberately aimed 25 degrees off so
-	# the course corrections have something to correct.
-	var offset: Vector3 = Vector3(1, 0.3, 0.4).normalized() * 400.0
+	# the course corrections have something to correct. Kept inside
+	# GravityManager.ARENA_BOUNDARY_RADIUS (535) - Umbra orbits at 350, so the
+	# old 400-unit offset could push the spawn point past 535 from the arena
+	# centre depending on direction, which now gets the shell destroyed as
+	# out-of-bounds on its very first frame (see Projectile._physics_process).
+	var offset: Vector3 = Vector3(1, 0.3, 0.4).normalized() * 150.0
 	shell.global_position = target_body.global_position + offset
 	var straight: Vector3 = -offset.normalized()
 	var askew: Vector3 = straight.rotated(offset.cross(Vector3.UP).normalized(), deg_to_rad(25.0))

@@ -351,6 +351,21 @@ func _add_slab_with_hole(y: float, half: float, hole: float) -> void:
 ## Rungs plus the climb volume that Player switches to ladder movement inside.
 ## `xz` is the shaft centre in local space; the climb runs from `from_y` to
 ## `to_y` along local +Y.
+##
+## The rails used to be built as ONE tall box each, from `from_y` straight to
+## `to_y`, positioned by a single _surface_transform() call at its own
+## midpoint. Every OTHER tall piece in this file gets segmented by _add_box()
+## so its curvature-compensated angle (see _surface_transform - the
+## arc-per-unit-height shrinks as height grows, or storeys higher up would fan
+## wider than the ones below) is recomputed per-segment; a ladder can run the
+## length of the whole tower, and a rail authored as one straight,
+## un-segmented box never got that per-height correction at all. The
+## individually-placed rungs did, so on a tall enough tower the rails visibly
+## drifted away from their own rungs the higher you climbed. Building the
+## rails from the same short segments as the rungs (RUNG_SPACING) fixes it -
+## both now go through the identical per-height transform.
+const RUNG_SPACING: float = 0.4
+
 func _add_ladder(xz: Vector2, from_y: float, to_y: float, shaft: float) -> void:
 	var height: float = to_y - from_y
 	if height <= 0.1:
@@ -359,12 +374,16 @@ func _add_ladder(xz: Vector2, from_y: float, to_y: float, shaft: float) -> void:
 	# Rails and rungs are cosmetic only - climbing is driven by the Ladder area,
 	# and solid rungs would just snag the player against the shaft wall.
 	var rail_offset: float = shaft * 0.28
+	var rail_seg_count: int = maxi(int(height / RUNG_SPACING), 1)
+	var rail_seg_height: float = height / float(rail_seg_count)
 	for side in [-1.0, 1.0]:
-		_add_box(Vector3(xz.x + rail_offset * side, from_y + height * 0.5, xz.y),
-			Vector3(0.09, height, 0.09), rung_color, false)
-	var rung_count: int = int(height / 0.4)
+		for i in range(rail_seg_count):
+			var seg_y: float = from_y + rail_seg_height * (float(i) + 0.5)
+			_add_box(Vector3(xz.x + rail_offset * side, seg_y, xz.y),
+				Vector3(0.09, rail_seg_height, 0.09), rung_color, false)
+	var rung_count: int = int(height / RUNG_SPACING)
 	for i in range(rung_count):
-		_add_box(Vector3(xz.x, from_y + 0.4 * float(i) + 0.2, xz.y),
+		_add_box(Vector3(xz.x, from_y + RUNG_SPACING * float(i) + 0.2, xz.y),
 			Vector3(rail_offset * 2.0, 0.06, 0.06), rung_color, false)
 
 	var zone := Ladder.new()

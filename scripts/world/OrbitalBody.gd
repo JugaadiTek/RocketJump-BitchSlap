@@ -188,25 +188,31 @@ func _orient_orbit_ring() -> void:
 
 ## Baked once and shared by every planet's material (see Asteroid.gd for why
 ## sharing a generated resource across near-identical instances matters) -
-## only the tiny 96x96 tile is ever built, however many planets use it.
-const BUMP_TILE_SIZE: int = 96
-## How many times the tile repeats across a planet's UV. A flat count rather
-## than one scaled per-radius, so a 44m world and a 5m pebble read as the same
-## hull plating at different zoom rather than the pattern changing scale.
-const BUMP_TILE_REPEAT: float = 26.0
+## only the tiny tile is ever built, however many planets use it.
+const BUMP_TILE_SIZE: int = 128
+## How many triangle-grid periods fit across the tile itself, and how many
+## times the tile then repeats across a planet's UV. What actually reads as
+## "one triangle" on a planet's surface is roughly BUMP_TILE_FREQ *
+## BUMP_TILE_REPEAT of them around the sphere - both were far too high
+## before (6 * 26 = 156), fine enough to blur into noise instead of reading
+## as triangles at all. A flat repeat count rather than one scaled per-radius,
+## so a 44m world and a 5m pebble read as the same hull plating at different
+## zoom rather than the pattern changing scale.
+const BUMP_TILE_FREQ: float = 3.0
+const BUMP_TILE_REPEAT: float = 9.0
 static var _bump_texture: ImageTexture = null
 
 ## Applies the shared triangular bump pattern to a (per-instance, already
-## duplicated) surface material as a subtle normal map - the low-poly facets
-## stay the silhouette, this just engraves a fine plating texture on top of
-## them without touching geometry.
+## duplicated) surface material as a normal map - the low-poly facets stay
+## the silhouette, this engraves a larger triangular plating texture with
+## embossed edges on top of them without touching geometry.
 func _apply_bump_pattern(mat: Material) -> void:
 	if not (mat is StandardMaterial3D):
 		return
 	var std_mat: StandardMaterial3D = mat as StandardMaterial3D
 	std_mat.normal_enabled = true
 	std_mat.normal_texture = _get_bump_texture()
-	std_mat.normal_scale = 0.35  ## subtle - an engraving, not a rock texture
+	std_mat.normal_scale = 0.75  ## an embossed edge should actually read as raised
 	std_mat.uv1_scale = Vector3(BUMP_TILE_REPEAT, BUMP_TILE_REPEAT, 1.0)
 
 static func _get_bump_texture() -> ImageTexture:
@@ -214,18 +220,22 @@ static func _get_bump_texture() -> ImageTexture:
 		_bump_texture = _build_bump_texture()
 	return _bump_texture
 
-## Renders a tileable triangular lattice into a normal map. The lattice is
-## three families of parallel bands along u, v, and u+v - the classic way to
-## draw a triangular grid, and exactly periodic in both u and v for any
-## integer frequency, so the tile wraps with no seam when uv1_scale repeats
-## it. Each band is a repeating triangle wave (tent function); summing the
-## three gives a height field with a triangular cell structure, which is then
-## differentiated into a normal via central-difference gradients - the same
-## "height field to normal" trick any terrain normal map uses.
+## Renders a tileable triangular lattice into a normal map, edges embossed and
+## faces flat - the previous version summed three overlapping triangle waves
+## into a smooth height field, which produced a moire-ish wobble rather than
+## anything reading as triangles, since a smooth sum has no actual edges
+## anywhere. This instead finds, per pixel, the distance to the NEAREST grid
+## line among three families running along u, v, and u+v (the standard way to
+## draw a triangular/hex lattice: three sets of parallel lines at 60 degrees
+## to each other, exactly periodic in u and v for any integer frequency, so
+## the tile wraps with no seam) and raises a thin ridge only right at that
+## distance, leaving each triangular cell's interior flat. The height field is
+## then differentiated into a normal via central-difference gradients - the
+## same "height field to normal" trick any terrain normal map uses.
 static func _build_bump_texture() -> ImageTexture:
 	var size: int = BUMP_TILE_SIZE
-	var freq: float = 6.0
-	var strength: float = 1.4
+	var freq: float = BUMP_TILE_FREQ
+	var strength: float = 3.0
 	var texel: float = 1.0 / float(size)
 	var img := Image.create(size, size, false, Image.FORMAT_RGB8)
 	for y in range(size):
@@ -239,13 +249,20 @@ static func _build_bump_texture() -> ImageTexture:
 			img.set_pixel(x, y, Color(n.x * 0.5 + 0.5, n.y * 0.5 + 0.5, n.z * 0.5 + 0.5))
 	return ImageTexture.create_from_image(img)
 
-static func _bump_height(u: float, v: float, freq: float) -> float:
-	return _tri_wave(u * freq) + _tri_wave(v * freq) + _tri_wave((u + v) * freq)
+## Height is 1 right on a triangle edge and falls to 0 within EDGE_WIDTH of
+## it, flat (0) the rest of the way to the cell centre - an embossed border
+## rather than a smooth dome.
+const BUMP_EDGE_WIDTH: float = 0.09
 
-## Repeating tent function, period 1: 0 at integers, 1 at half-integers.
-static func _tri_wave(x: float) -> float:
-	var f: float = fposmod(x, 1.0)
-	return absf(f * 2.0 - 1.0)
+static func _bump_height(u: float, v: float, freq: float) -> float:
+	var d: float = minf(_line_dist(u * freq), minf(_line_dist(v * freq), _line_dist((u + v) * freq)))
+	return 1.0 - smoothstep(0.0, BUMP_EDGE_WIDTH, d)
+
+## Distance from `x` to the nearest integer (i.e. the nearest grid line in
+## this family), as a fraction of one period: 0 exactly on the line, 0.5 at
+## the midpoint between two lines.
+static func _line_dist(x: float) -> float:
+	return absf(fposmod(x + 0.5, 1.0) - 0.5)
 
 ## Thin emissive shell just above the surface, rendered inside-out so only the
 ## limb shows through - the atmospheric rim glow every planet has in the concept
@@ -295,10 +312,12 @@ func _update_atmosphere_visibility() -> void:
 	_atmosphere.visible = not (viewer != null and viewer.get_frame_body() == self)
 
 ## The local viewer is the same for every body in a given physics frame, so
-## the group scan runs once per frame (cached statically) instead of once per
-## body - with a dozen-plus planets all calling this, repeating the scan per
-## body would be the same O(bodies x players) cost the atmosphere check used
-## to have, just moved rather than fixed.
+## the group scan (GravityManager.find_local_viewer(), the shared
+## implementation - ArenaBoundary uses the same one) runs once per frame
+## here, cached statically, instead of once per body - with a dozen-plus
+## planets all calling this, repeating the scan per body would be the same
+## O(bodies x players) cost the atmosphere check used to have, just moved
+## rather than fixed.
 static var _local_viewer: Player = null
 static var _local_viewer_frame: int = -1
 
@@ -307,13 +326,7 @@ static func _find_local_viewer() -> Player:
 	if frame == _local_viewer_frame:
 		return _local_viewer
 	_local_viewer_frame = frame
-	_local_viewer = null
-	var tree: SceneTree = Engine.get_main_loop() as SceneTree
-	if tree:
-		for player in tree.get_nodes_in_group("players"):
-			if is_instance_valid(player) and player is Player and (player as Player).is_first_person_view():
-				_local_viewer = player
-				break
+	_local_viewer = GravityManager.find_local_viewer()
 	return _local_viewer
 
 func _resize_atmosphere() -> void:

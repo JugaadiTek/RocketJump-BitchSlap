@@ -55,6 +55,20 @@ func _physics_process(delta: float) -> void:
 	if _life_remaining <= 0.0:
 		_expire()
 		return
+	# Past the arena's outer edge and clearly never landing anywhere -
+	# previously a miss just sailed on until its own lifetime timer ran out,
+	# up to `lifetime` seconds later, for no gameplay reason.
+	#
+	# Deliberately the WHOLE-arena sphere (GravityManager.ARENA_BOUNDARY_
+	# RADIUS), not the tighter per-planet box Player._apply_arena_bounds()
+	# uses (GravityManager.is_within_boundary()) - that box exists to stop a
+	# PLAYER loitering in open space, but a Planet Buster shell is SUPPOSED
+	# to cross open space between two planets that can be hundreds of metres
+	# apart, well outside either one's 50m box, for most of its flight. The
+	# box would have destroyed every long-range shot on its way to the target.
+	if global_position.length() > GravityManager.ARENA_BOUNDARY_RADIUS:
+		_expire()
+		return
 
 	if affected_by_gravity:
 		velocity += GravityManager.get_gravity_at(global_position) * gravity_multiplier * delta

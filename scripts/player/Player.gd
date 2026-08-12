@@ -380,16 +380,22 @@ func _distance_to_nearest_surface() -> float:
 		return INF
 	return global_position.distance_to(body.global_position) - body.radius
 
-## Hard edge of the arena. Crossing it hands the player straight to the Spawner,
-## which flings them at a randomly chosen planet on the same trailed launch a
-## respawn uses - no aim window, no choice.
+## Hard edge of playable space. Crossing it hands the player straight to the
+## Spawner, which flings them at a randomly chosen planet on the same trailed
+## launch a respawn uses - no aim window, no choice.
+##
+## "The edge" is GravityManager.is_within_boundary(): a box around whichever
+## planet is nearest, not a single sphere around the arena centre - so
+## drifting far from every planet counts as out of bounds even if that point
+## is still well inside the old arena-wide radius, which is what let players
+## camp in open space between worlds.
 ##
 ## The previous version steered velocity itself and returned early, while
 ## _apply_movement ALSO returned early because a boundary target was set. Between
 ## them nothing ever called move_and_slide(), so a player who touched the edge
 ## simply stopped dead there and stayed stuck.
 func _apply_arena_bounds() -> void:
-	if global_position.length() <= GravityManager.ARENA_BOUNDARY_RADIUS:
+	if GravityManager.is_within_boundary(global_position):
 		return
 	if _spawner == null or _is_spawning():
 		return
