@@ -83,6 +83,16 @@ func _process_flying(delta: float) -> void:
 		_land_on_surface(collider.get_meta("orbital_body"), collision.get_position(), collision.get_normal())
 	elif collider and collider != owner_player and collider.has_method("apply_damage"):
 		_hit_player(collider, collision.get_position())
+	else:
+		# Any other solid hit - a Tower/Bunker/Turret wall, or any world
+		# geometry that isn't a planet surface. Neither branch above matches
+		# plain building StaticBody3Ds (no orbital_body meta, no
+		# apply_damage), so this used to fall through untouched: still
+		# FLYING, and move_and_collide just kept re-blocking against the same
+		# wall next frame, leaving the slug motionless and inert against it
+		# for the rest of its lifetime instead of landing, hitting, or going
+		# away. Expire the same way a shot that misses everything already does.
+		_expire()
 
 ## Gravity bites harder the further from any surface the slug is, which is what
 ## turns a shot fired from open space into a curving dive into the nearest well

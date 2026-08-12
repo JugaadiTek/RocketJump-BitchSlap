@@ -37,11 +37,20 @@ func _process(delta: float) -> void:
 	if _cooldown_remaining > 0.0:
 		_cooldown_remaining -= delta
 
-func try_activate() -> void:
+## `forced_target`, when given, skips _find_target()'s own range/cone re-scan
+## and slaps that exact target instead - used by GrapplingHook, which already
+## knows precisely who it just reeled to point-blank range. Re-running
+## _find_target() there was whiffing in practice: a pulled target arrives
+## along the line TOWARD the shooter's position, not necessarily inside the
+## shooter's current look-direction cone, so the independent re-check could
+## (and in testing, reliably did) reject the very target the pull just
+## delivered. Still validated for liveness so a target that died or was freed
+## between the pull and this call is a harmless no-op, same as a manual miss.
+func try_activate(forced_target: Player = null) -> void:
 	if state != State.IDLE or _cooldown_remaining > 0.0:
 		return
-	var target: Player = _find_target()
-	if target == null:
+	var target: Player = forced_target if forced_target != null else _find_target()
+	if target == null or not is_instance_valid(target) or target.is_dead:
 		return
 	_cooldown_remaining = cooldown
 	Sfx.play_3d("slap", _player.global_position, 1.0, 2.0)

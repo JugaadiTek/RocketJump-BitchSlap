@@ -108,9 +108,21 @@ func _add_speech_bubble(victim_name: String) -> void:
 	skull.position = Vector3(1.55, 0.0, 0.02)
 	bubble.add_child(skull)
 
+## Shared across every DeathEffect, same pattern as OrbitalBody's bump texture
+## and Asteroid's shared mesh - the drawn image never varies per-death, so
+## baking it fresh every time (measured: ~3ms of nested pixel-loop work) was
+## pure repeated cost. Built once on the first death of the whole match; every
+## death after that is free.
+static var _skull_texture_cache: ImageTexture = null
+
+func _skull_texture() -> ImageTexture:
+	if _skull_texture_cache == null:
+		_skull_texture_cache = _build_skull_texture()
+	return _skull_texture_cache
+
 ## Draws a skull into an image. Deliberately not an emoji: the bundled font has
 ## no glyph for one, so it would come out as a hollow rectangle.
-func _skull_texture() -> ImageTexture:
+static func _build_skull_texture() -> ImageTexture:
 	var size: int = 96
 	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0, 0, 0, 0))

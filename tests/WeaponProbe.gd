@@ -433,12 +433,18 @@ func _test_grapple_auto_melee() -> void:
 		p.disable_spawner()
 		p.velocity = Vector3.ZERO
 	shooter.global_position = _body.global_position + out * (_body.radius + 1.2)
-	target.global_position = shooter.global_position + tangent * 10.0
+	# A flat tangent offset from a curved surface point lands slightly ABOVE
+	# the true surface (chord vs. arc) - small on a large planet, but Ferrum's
+	# radius (7m) makes even a modest offset pop up several metres, needing
+	# longer than expected to fall back and settle. Kept short (6m, not 10)
+	# and given a longer settle window so both players are actually resting
+	# on the ground, not still mid-fall, when the hook fires.
+	target.global_position = shooter.global_position + tangent * 6.0
 	shooter.global_transform.basis = Basis(out.cross(-fwd).normalized(), out, -fwd).orthonormalized()
 	target.global_transform.basis = Basis(out.cross(fwd).normalized(), out, fwd).orthonormalized()  # facing shooter
 	shooter.reset_frame()
 	target.reset_frame()
-	for i in range(60):
+	for i in range(150):
 		await get_tree().physics_frame
 
 	shooter.probe_switch = WEAPON_GRAPPLE
@@ -484,6 +490,15 @@ func _test_grapple_auto_melee() -> void:
 		if ever_pulled and is_instance_valid(hook) and hook._hook_state == GrapplingHook.HookState.IDLE:
 			break
 	shooter.probe_fire = false
+	# try_activate() only STARTS the windup/slap/slam sequence (Melee.gd,
+	# ~0.22s total) - the hook itself has already gone back to IDLE and
+	# detached well before _resolve_hit() actually lands the kill, so the
+	# loop above breaking out on hook-state alone would check target.is_dead
+	# too early. Give the in-flight slap sequence room to finish.
+	for i in range(30):
+		await get_tree().physics_frame
+		if is_instance_valid(target) and target.is_dead:
+			break
 	var target_died: bool = is_instance_valid(target) and target.is_dead
 	var melee_cooldown_after: float = shooter.melee._cooldown_remaining if shooter.melee else -1.0
 	_log("AUTOSLAP hook ever entered PULLING_TARGET=%s, reeled within melee range=%s | auto-triggered melee killed target=%s | shooter.melee cooldown after=%.2fs (>0 means try_activate() found and grabbed a target; 0 means every call whiffed Melee's own range/cone re-check)" % [

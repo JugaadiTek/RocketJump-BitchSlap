@@ -152,7 +152,7 @@ func _bench_skull_texture() -> void:
 	var t0: int = Time.get_ticks_usec()
 	var tex: ImageTexture = effect._skull_texture()
 	var t1: int = Time.get_ticks_usec()
-	_log("SKULL   single _skull_texture() bake = %.3fms (%dx%d, uncached - static var would make every call after the first ~free)" % [
+	_log("SKULL   single _skull_texture() bake = %.3fms (%dx%d, cached as a static var - this run's own first call already paid the real bake cost, everything since is the free path)" % [
 		(t1 - t0) / 1000.0, tex.get_width(), tex.get_height()])
 
 	var burst: int = 8

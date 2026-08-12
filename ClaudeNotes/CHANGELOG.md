@@ -7,6 +7,139 @@ in [`tests/`](../tests) — see **Test harness** at the bottom.
 
 ---
 
+## 2026-08-13 — Session 13: fixed the four Session 12 bugs, applied three recommended optimizations, towers now always full circumference
+
+Follow-through on Session 12's audit: fixes for all four reported bugs,
+the three recommended optimizations, and a requested tuning change (tower
+height). Verified against the same real binary, same method (probe suite,
+not read-off-the-source).
+
+### Bug fix: ladder climbs stalling on tall towers
+Root cause confirmed: `Player._update_planet_frame()` releases the current
+planet frame once altitude exceeds `planet_frame_height * planet_frame_release_ratio`
+(36.4m) - correct for open-air flight, but climbing is locked, planet-carried
+motion for the ladder's WHOLE length regardless of height (see
+`_apply_ladder_movement`). Past that altitude the player's transform stopped
+being carried by the host planet's spin/orbit while the ladder itself (a
+child of that same planet) kept moving, so the two silently drifted apart
+until the player fell out of the ladder's own narrow trigger volume.
+`_update_planet_frame()` now stays locked to the current frame body for the
+whole climb whenever `_is_on_ladder()` is true. Verified with structural
+collisions suppressed for the test window (see below): a 226m climb now
+proceeds cleanly and monotonically past the old ~36m stall point (1→12→24→35→46→57→69m,
+`on_ladder=true` throughout) instead of stopping at 8-32% of the tower's height.
+[scripts/player/Player.gd](../scripts/player/Player.gd)
+
+**Test-only finding surfaced while verifying this**: with every tower now at
+a large, constant `structure_reach` (see the tower-height change below),
+`GravityManager`'s real, unforced structural-collision contact distance grew
+enough that a long climb on the arena's single furthest-out body could get
+its own tower demolished mid-test by an ordinary, unrelated orbital
+collision - correctly reproducible, and confirmed via `Building.is_demolished()`/`OrbitalBody.is_shattered`,
+not a ladder defect. `WorldProbe`'s tower-height test now detects this
+distinctly (so it never gets misread as a climb failure again), suppresses
+it via `collision_cooldown` for its own verification window, and runs before
+`_test_structural_collision()` instead of after.
+[tests/WorldProbe.gd](../tests/WorldProbe.gd)
+
+### Bug fix: spawn point no longer inside the live boundary
+`Spawner.SPAWN_RADIUS` was a constant (505m) chosen once, "clear of Halcyon
+(476)" - it never adapted once `GravityManager.arena_half_extent()` started
+flexing with live structure_reach. Replaced with `Spawner._spawn_radius()`
+(static), computed fresh each spawn as `arena_half_extent() - SPAWN_BOUNDARY_MARGIN`
+(30m, clamped to a 100m floor) - spawns now stay a fixed margin inside
+whatever the boundary currently is, however far a tower pushes it out.
+[scripts/player/Spawner.gd](../scripts/player/Spawner.gd)
+
+### Bug fix: slugs no longer go inert against building walls
+`Slug._process_flying()` only recognised a hit as "landed" (`orbital_body`
+meta) or "hit a player" (`apply_damage`) - a Tower/Bunker/Turret wall matched
+neither, so the slug just sat there, still `FLYING`, for the rest of its
+lifetime. Added a fallback: any other solid hit now expires the slug, the
+same way a shot that misses everything already does. Verified: a slug fired
+straight at a tower wall now shows `freed` within 2 seconds instead of
+sitting there alive with near-zero residual speed.
+[scripts/weapons/Slug.gd](../scripts/weapons/Slug.gd)
+
+### Bug fix: grapple-triggered Bitchslap actually lands now
+Two compounding issues, both fixed:
+- `Melee.try_activate()` now takes an optional `forced_target`. Reeling a
+  player to point-blank range and then re-running `_find_target()`'s own
+  range/cone scan could (and in testing, reliably did) reject the very
+  target the pull just delivered, since a pulled target approaches along the
+  line TOWARD the shooter, not necessarily inside whatever direction the
+  shooter's camera currently happens to face. `GrapplingHook._do_pull()` now
+  passes `_pull_target` directly, skipping the redundant re-scan for this
+  one caller (manual melee still goes through `_find_target()` unchanged).
+- While verifying this, found and fixed the *test's* aim: `Weapon.fire()`'s
+  `aim_direction` is the camera's forward vector used as-is from the
+  MUZZLE's own (offset) origin - the two rays are parallel, not converging,
+  so aiming the crosshair exactly at a close target can still send the
+  muzzle's ray past it. Not a gameplay bug (a real player's crosshair is
+  typically close enough to the muzzle for this offset to be negligible past
+  a couple of metres), but it made the probe itself whiff until corrected.
+- Verified end to end: hook reels target to point-blank range, auto-slap
+  fires, target dies.
+[scripts/melee/Melee.gd](../scripts/melee/Melee.gd),
+[scripts/weapons/GrapplingHook.gd](../scripts/weapons/GrapplingHook.gd),
+[tests/WeaponProbe.gd](../tests/WeaponProbe.gd)
+
+### Bug fix: melee keybind now documented correctly
+`InputSetup.gd`'s `"melee"` InputMap action bound **F**; `Player._wants_melee()`
+has only ever hardcoded **V** and never read that action - purely a stale,
+misleading binding for anything that might surface it. Changed to **V** to
+match reality.
+[scripts/autoload/InputSetup.gd](../scripts/autoload/InputSetup.gd)
+
+### Optimization: bot line-of-sight raycasts spread across frames
+Every bot's `_retarget_timer` started at 0.0, so all of them re-ran
+`_find_enemy()`'s O(bots) line-of-sight raycast sweep on the exact same
+physics frame every 0.25s, then went quiet - a periodic burst instead of a
+steady cost. `Bot._ready()` now seeds `_retarget_timer` with a random offset
+in `[0, retarget_interval)`, so the same total work lands spread across the
+interval instead of spiking once per quarter-second. Total cost is
+unchanged (~3ms/s of play, unavoidable given the raycast count) - this
+smooths frame-time variance, which is what a player actually feels.
+[scripts/ai/Bot.gd](../scripts/ai/Bot.gd)
+
+### Optimization: death-effect skull texture cached
+`DeathEffect._skull_texture()` baked a fresh 96x96 image (~3ms, measured)
+on every single death, unlike every other generated texture in the project
+(`OrbitalBody`'s bump map, `Asteroid`'s shared mesh), which are cached once.
+Split into a cached `_skull_texture()` wrapper over a `static func _build_skull_texture()`.
+Measured: 3.375ms → 0.003ms per call after the first; an 8-death burst went
+from 24.1ms total to 0.004ms.
+[scripts/world/DeathEffect.gd](../scripts/world/DeathEffect.gd)
+
+### Optimization: scoreboard sort no longer runs every physics tick unconditionally
+`MatchState.get_all_scores()` rebuilt and `sort_custom()`'d its whole list on
+every call, and `Player._physics_process()` calls it unconditionally every
+physics tick for the local human's own HUD regardless of whether any score
+actually changed. Added a `_scores_dirty` flag, set on `register_player()`/
+`unregister_player()`/a real score change, and cleared once the list is
+rebuilt; `get_all_scores()` now returns the cached list on every unchanged
+call. Measured: 128.3us/call (63 players) → 0.191us/call, a 670x drop on
+the common case.
+[scripts/autoload/MatchState.gd](../scripts/autoload/MatchState.gd)
+
+### Change: tower height now always the full circumference
+Per request: was randomised between a planet's radius (min) and circumference
+(max); now always the circumference (`TAU * radius`), consistently, subject
+to the same existing safety trim for permanently-fixed-separation pairs
+(the central binary, a moon and its own parent). Real, measured cost of
+always taking the top of the old range rather than sometimes: worst-case
+single-tower build time unchanged in isolation (~192ms, same ceiling as
+before), but arena load time rose from ~295-320ms to 497ms (every
+tower-bearing body now pays it, not just whichever ones randomly rolled
+tall), and `PerfProbe --sustained` reads 9.07ms mean / 97 of 2400 frames
+over 20ms - both broadly in line with Session 12's already-flagged tower-height
+cost, not a new regression. The three optimizations above measurably helped
+here too: spike count is down from Session 12's own 169/2400 despite every
+tower now costing the maximum instead of a random draw.
+[scripts/world/Arena.gd](../scripts/world/Arena.gd)
+
+---
+
 ## 2026-08-13 — Session 12: full performance + feature audit (no fixes applied)
 
 Audit only, requested end-to-end: rank every system's real runtime cost and

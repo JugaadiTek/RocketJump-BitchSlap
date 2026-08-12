@@ -124,12 +124,15 @@ func _do_pull(delta: float) -> void:
 		if to_player.length() < 3.0:
 			# Reeled all the way in - follow through with the Bitchslap
 			# automatically rather than leaving the catch to a separate button
-			# press. try_activate() finds its own target by range/cone (see
-			# Melee.gd), so this only actually lands if the reeled-in player
-			# is still where the pull left them; a dead/cooldown/out-of-cone
-			# no-op here is harmless, same as pressing the button and missing.
+			# press. Passed directly as the forced target rather than letting
+			# Melee re-find one by its own range/cone scan: the pull brings
+			# the target in along the line toward the shooter, not
+			# necessarily inside the shooter's current look-direction cone,
+			# so the independent re-check could reject the very player the
+			# pull just delivered. Melee.try_activate() still no-ops harmlessly
+			# if they died or were freed between the pull and this call.
 			if p.melee:
-				p.melee.try_activate()
+				p.melee.try_activate(_pull_target as Player)
 			_begin_retract()
 			return
 		if _pull_target.has_method("apply_impulse"):

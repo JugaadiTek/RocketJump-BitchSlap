@@ -275,7 +275,20 @@ func _physics_process(delta: float) -> void:
 ## impulses and gravity need no adjustment).
 func _update_planet_frame(delta: float) -> void:
 	var body: OrbitalBody = GravityManager.get_nearest_body(global_position)
-	if body != null:
+	if _is_on_ladder() and _frame_body != null and is_instance_valid(_frame_body):
+		# Climbing is locked, planet-carried motion for the ladder's WHOLE
+		# length (see _apply_ladder_movement), however tall the tower - the
+		# altitude release below exists for open-air flight, and applying it
+		# mid-climb stops the player's transform being carried by the host
+		# planet's spin/orbit while the ladder itself (a child of that same
+		# planet) keeps moving regardless, so the two silently drift apart
+		# and the player walks out of the ladder's own narrow trigger volume.
+		# Confirmed via WorldProbe: a climb stalled at ~36m on a 137m tower,
+		# right at planet_frame_height * planet_frame_release_ratio (26 *
+		# 1.4). Stay locked to whatever frame we're already riding for the
+		# whole climb instead.
+		body = _frame_body
+	elif body != null:
 		# Hysteresis: hold on to the frame we already have a little past the
 		# acquire range so a player hovering at the edge, or sitting midway
 		# between two close bodies, doesn't flip frames every frame.

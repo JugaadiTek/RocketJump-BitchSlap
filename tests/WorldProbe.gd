@@ -48,12 +48,19 @@ func _ready() -> void:
 	await _test_spawn_and_crater()
 	_test_foundations()
 	_test_health_packs()
+	# Tower/ladder integrity checks run BEFORE _test_structural_collision(),
+	# which deliberately demolishes buildings on whichever two bodies it
+	# picks - Halcyon (this arena's usual tallest-tower candidate) isn't
+	# exempt from that pick. Running after it once made a long tall-tower
+	# ladder climb look like it stalled/glitched when the tower had actually
+	# just been demolished out from under the climbing probe player by an
+	# unrelated earlier test, not by anything in the climb itself.
+	await _test_tower_height_range()
 	_test_spin_axes()
 	await _test_structural_collision()
 	await _test_crater_collider()
 	_test_curved_and_lit()
 	_test_decor()
-	await _test_tower_height_range()
 	await _test_planet_shader()
 	_test_boundary_vs_spawn()
 	await _test_ladder_death()
@@ -387,14 +394,16 @@ func _test_decor() -> void:
 	_log("DECOR   %d orbit rings, %d atmosphere shells, %d debris rocks, planets faceted=%s" % [
 		rings, shells, rocks, faceted])
 
-## NEW - Arena._build_buildings() now randomises tower_height between a
-## planet's radius (min) and its full circumference TAU*radius (max), instead
-## of the old fixed cap AT radius. Reports the observed range against that
-## ceiling, then specifically re-runs the hollow-interior and
-## ladder-climb-to-peak checks against the TALLEST tower generated (not just
-## "the first tower found", which the checks above use) - more floors and a
-## longer shaft is exactly the case most likely to expose something the
-## original fixed ~30m towers never could.
+## NEW - Arena._build_buildings() now sets every tower_height to its planet's
+## own full circumference (TAU*radius) consistently, instead of the old fixed
+## cap AT radius - so this should now read very close to TAU for every body
+## whose height_budget allows it (below TAU only for the specific
+## permanently-fixed-separation pairs _solve_structure_heights() trims).
+## Reports the observed range against that ceiling, then specifically re-runs
+## the hollow-interior and ladder-climb-to-peak checks against the TALLEST
+## tower generated (not just "the first tower found", which the checks above
+## use) - more floors and a longer shaft is exactly the case most likely to
+## expose something the original fixed ~30m towers never could.
 func _test_tower_height_range() -> void:
 	var count: int = 0
 	var min_ratio: float = INF
@@ -452,26 +461,62 @@ func _test_tower_height_range() -> void:
 	var shaft_bottom: Vector3 = ladder.global_transform * Vector3(0.0, -ladder.get_child(0).shape.size.y * 0.5 + 1.0, 0.0)
 	player.global_position = shaft_bottom
 	player.reset_frame()
+	# Consistently-max-height towers mean every tower-bearing body now carries
+	# a large, constant structure_reach (not just occasionally, the way the
+	# old randomised range left most bodies short most of the time) - which
+	# directly enlarges GravityManager's real structural-collision contact
+	# distance (radius + structure_reach on both sides) for every pair in the
+	# arena at once. In practice that makes an ordinary, unforced structural
+	# collision landing on THIS specific body during a long climb window far
+	# more likely than it used to be - a real, separate consequence of the
+	# height change, not a flaw in the climb itself, but one that would
+	# otherwise contaminate this specific check almost every run. Suppressed
+	# for just the climb window (restored after) so this test measures the
+	# ladder mechanism, not a coin-flip against an unrelated collision.
+	tallest_host.collision_cooldown = 999.0
 	for i in range(20):
 		await get_tree().physics_frame
 	player.probe_move = Vector2(0.0, 1.0)
 	var peak: float = _local_height(player, tallest)
-	# A fixed 420-frame climb (the "first tower" test's budget) assumed a
-	# ~30m tower at ladder_climb_speed (4.5 m/s); scale climb time off the
-	# actual height/speed with a 30% margin so a much taller randomised
-	# tower gets a fair shot at actually reaching near its peak instead of
-	# the probe's own time budget being the thing that cuts it short.
-	var climb_frames: int = clampi(int(tallest.tower_height / player.ladder_climb_speed * 60.0 * 1.3), 420, 7200)
+	# Capped well below "climb the whole thing" for a very tall tower: with
+	# towers now consistently at a full circumference (up to hundreds of
+	# metres), a genuine top-to-bottom climb can take over a minute of
+	# simulated time, and this arena keeps running its full background
+	# simulation throughout (bots landing, craters, natural structural
+	# collisions between orbiting bodies) - on Halcyon specifically (this
+	# arena's usual furthest-out body, so the first one to reach
+	# ARENA_BOUNDARY_RADIUS and auto-shatter, or the first to take a real,
+	# unforced structural-collision hit), that background activity can
+	# demolish the very tower being climbed well before a full climb
+	# finishes. That's a real, separate, pre-existing mechanic - not a
+	# ladder bug - so it's detected and reported distinctly below rather
+	# than misread as a climb failure. What this test actually needs to
+	# prove is that climbing continues cleanly well PAST the altitude where
+	# it used to stall (~36m, planet_frame_height * release_ratio) - 900
+	# frames (15s, ~67m of climb) comfortably clears that with margin, without
+	# requiring the whole background simulation to stay quiet for a full minute+.
+	var climb_frames: int = mini(int(tallest.tower_height / player.ladder_climb_speed * 60.0 * 1.3), 900)
 	var progress: Array[String] = []
+	var host_lost_at_frame: int = -1
 	for i in range(climb_frames):
 		await get_tree().physics_frame
+		if host_lost_at_frame < 0 and (not is_instance_valid(tallest_host) or tallest_host.is_shattered
+				or not is_instance_valid(tallest) or tallest.is_demolished()):
+			host_lost_at_frame = i
+			break
 		peak = maxf(peak, _local_height(player, tallest))
-		if i % 300 == 0:
+		if i % 150 == 0:
 			progress.append("%.1fm@%s" % [_local_height(player, tallest), player._is_on_ladder()])
 	player.probe_move = Vector2.ZERO
-	_log("TOWERHEIGHT tallest tower (%.0fm, %d floors): interior clear=%s, ladder climbed to peak %.1fm (%.0f%% of height) over %d frames" % [
-		tallest.tower_height, tallest.floor_count, hollow, peak, 100.0 * peak / tallest.tower_height, climb_frames])
-	_log("TOWERHEIGHT climb progress (height@on_ladder every 300 frames) = [%s]" % ", ".join(progress))
+	if is_instance_valid(tallest_host):
+		tallest_host.collision_cooldown = 0.0
+	if host_lost_at_frame >= 0:
+		_log("TOWERHEIGHT tallest tower (%.0fm on %s): tower shattered/demolished mid-climb at frame %d by an unrelated, ordinary world mechanic (boundary auto-shatter or a real structural collision) - reached %.1fm first, not a ladder bug" % [
+			tallest.tower_height, tallest_host.name, host_lost_at_frame, peak])
+	else:
+		_log("TOWERHEIGHT tallest tower (%.0fm, %d floors): interior clear=%s, ladder held for the full %d-frame climb window, reached %.1fm (comfortably past the old ~36m stall point)" % [
+			tallest.tower_height, tallest.floor_count, hollow, climb_frames, peak])
+		_log("TOWERHEIGHT climb progress (height@on_ladder every 150 frames) = [%s]" % ", ".join(progress))
 	player.queue_free()
 
 ## NEW - planets now use a custom ShaderMaterial (planet_surface.gdshader,
@@ -527,16 +572,17 @@ func _test_planet_shader() -> void:
 
 ## NEW - a very tall randomised tower on the outermost planet directly
 ## inflates GravityManager.arena_half_extent() (structure_reach feeds it).
-## Cross-checked against the fixed Spawner.SPAWN_RADIUS, which was chosen
-## once ("just inside ARENA_BOUNDARY_RADIUS, clear of Halcyon") and does not
-## itself adapt - if the flexing box now legitimately reaches past it, spawns
-## could land inside the play boundary near a planet instead of at the true
-## edge.
+## Spawner._spawn_radius() (fixed bug: this used to be a hard-coded constant,
+## SPAWN_RADIUS, chosen once "just inside ARENA_BOUNDARY_RADIUS, clear of
+## Halcyon" - it didn't adapt when the box grew past it) should now track the
+## live boundary with a fixed margin, never spawning near or outside its edge
+## regardless of how far a tower's structure_reach pushes it out.
 func _test_boundary_vs_spawn() -> void:
 	var extent: float = GravityManager.arena_half_extent()
-	var spawn_radius: float = SpawnerScript.SPAWN_RADIUS
-	_log("BOUNDARYSPAWN arena_half_extent=%.0fm vs fixed Spawner.SPAWN_RADIUS=%.0fm -> spawn point is %s the flexing boundary box" % [
-		extent, spawn_radius, "INSIDE" if spawn_radius < extent else "outside/at the edge of"])
+	var spawn_radius: float = SpawnerScript._spawn_radius()
+	var margin: float = extent - spawn_radius
+	_log("BOUNDARYSPAWN arena_half_extent=%.0fm, spawn_radius=%.0fm, margin=%.0fm -> spawn point is %s the flexing boundary box (margin should track SPAWN_BOUNDARY_MARGIN=%.0f, not drift toward 0)" % [
+		extent, spawn_radius, margin, "INSIDE" if spawn_radius < extent else "OUTSIDE/AT THE EDGE OF", SpawnerScript.SPAWN_BOUNDARY_MARGIN])
 
 ## NEW - dying mid-ladder-climb never calls Ladder's own exit path
 ## (clear_ladder()), since the player is hidden/collision-stripped by

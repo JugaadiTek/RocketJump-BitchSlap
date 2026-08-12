@@ -11,7 +11,18 @@ extends Node
 
 signal spawn_complete
 
-const SPAWN_RADIUS: float = 505.0   ## just inside ARENA_BOUNDARY_RADIUS, clear of Halcyon (476)
+## Kept inside the LIVE arena boundary by this much, not a fixed distance from
+## a hard-coded planet reach. GravityManager.arena_half_extent() flexes with
+## whatever currently reaches furthest out (including a tower's own
+## structure_reach, which can now be several times a planet's radius) - a
+## fixed SPAWN_RADIUS chosen "clear of Halcyon" back when nothing reached
+## past ~476 stayed fixed at 505 even once a tall tower pushed the real
+## boundary out past 650, which put every spawn well inside the live play
+## area instead of at its edge.
+const SPAWN_BOUNDARY_MARGIN: float = 30.0
+## Absolute floor so a tiny/collapsed arena can't produce a degenerate (or
+## negative) spawn radius.
+const MIN_SPAWN_RADIUS: float = 100.0
 ## Default seconds to pick a planet; the actual window comes from the spawning
 ## entity (Player.get_spawn_aim_window()), which bots shorten drastically.
 const AIM_WINDOW: float = 10.0
@@ -67,10 +78,19 @@ func start_spawn(p: Player) -> void:
 	_aim_window = p.get_spawn_aim_window()
 	_place_at_boundary()
 
+## Distance from the arena origin to spawn at: a point at this radius is
+## guaranteed inside GravityManager's box boundary (any point on a sphere of
+## radius R has every axis component <= R, so R <= half_extent keeps it
+## inside on every axis), staying SPAWN_BOUNDARY_MARGIN clear of the live edge
+## instead of a distance chosen once for whatever reached furthest out at the
+## time.
+static func _spawn_radius() -> float:
+	return maxf(GravityManager.arena_half_extent() - SPAWN_BOUNDARY_MARGIN, MIN_SPAWN_RADIUS)
+
 func _place_at_boundary() -> void:
 	# Random point on boundary sphere
 	var rand_dir := Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)).normalized()
-	player.global_position = rand_dir * SPAWN_RADIUS
+	player.global_position = rand_dir * _spawn_radius()
 	# Face inward toward arena center
 	var inward: Vector3 = -rand_dir
 	var ref: Vector3 = Vector3.RIGHT if abs(inward.dot(Vector3.RIGHT)) < 0.9 else Vector3.FORWARD

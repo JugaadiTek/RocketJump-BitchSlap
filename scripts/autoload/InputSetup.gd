@@ -22,7 +22,7 @@ const KEY_ACTIONS: Dictionary = {
 	"move_right": KEY_D,
 	"jump": KEY_SPACE,
 	"crouch": KEY_CTRL,
-	"melee": KEY_F,
+	"melee": KEY_V,  ## matches Player._wants_melee()'s hardcoded key; was KEY_F, which nothing else ever agreed with
 	"weapon_rocket": KEY_1,
 	"weapon_railgun": KEY_2,
 	"weapon_slug": KEY_3,
