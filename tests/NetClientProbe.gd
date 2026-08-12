@@ -1,8 +1,11 @@
 extends Node
 ## Headless multiplayer CLIENT probe. Exercises the exact code path
-## MainMenu._on_join_pressed() does (NetworkManager.join_game() then load
-## Arena.tscn once connected_to_server fires), driven directly instead of via
-## button clicks. Pair with NetHostProbe.gd running as a separate OS process.
+## MainMenu._on_join_pressed() does - NetworkManager.join_game() immediately
+## followed by loading Arena.tscn, NOT waiting for connected_to_server first
+## (see the fix in MainMenu.gd/NetworkManager.gd and the CHANGELOG entry it's
+## documented under) - driven directly instead of via button clicks. Pair
+## with NetHostProbe.gd running as a separate OS process.
+##
 ## See NetHostProbe.gd's header for why the actual monitoring lives in a
 ## Monitor node added to get_tree().root rather than in this node - the
 ## change_scene_to_file() call below frees whatever the current_scene was,
@@ -19,6 +22,8 @@ static func _log(line: String) -> void:
 		f.seek_end(); f.store_line(line); f.close()
 
 func _ready() -> void:
+	# See NetHostProbe.gd - same reasoning for waiting a frame before driving
+	# any scene-tree-affecting calls from the very first _ready().
 	await get_tree().process_frame
 
 	var address: String = "127.0.0.1"
@@ -37,45 +42,19 @@ func _ready() -> void:
 		return
 	_log("CLIENT  connecting to %s:%d ..." % [address, port])
 
-	var connected: bool = false
-	var failed: bool = false
-	NetworkManager.connected_to_server.connect(func(): connected = true)
-	NetworkManager.connection_failed.connect(func(): failed = true)
-
-	# Wall-clock timeout, not a fixed frame count: headless runs uncapped and
-	# unpredictably fast (a first pass here counted 600 frames in ~4.5s and
-	# gave up before a frame-count budget could reflect real elapsed time).
-	# 25s is generous - the host side of this same handshake reliably
-	# registers the peer within ~9s (see NetHostProbe.gd) - but this is NOT
-	# just about giving a slow connection more time: as of this writing,
-	# repeated runs (including a 60s budget) show the client's
-	# connected_to_server NEVER fires at all even though the host's side
-	# completes and successfully replicates a player for the new peer -
-	# see the CHANGELOG entry this probe's addition is documented under.
-	while Time.get_ticks_msec() - t0 < 25000:
-		await get_tree().process_frame
-		if connected or failed:
-			break
-	var elapsed_ms: int = Time.get_ticks_msec() - t0
-
-	if failed:
-		_log("CLIENT  connection_failed after %dms" % elapsed_ms)
-		get_tree().quit(1)
-		return
-	if not connected:
-		_log("CLIENT  TIMED OUT after %dms waiting for connected_to_server (host unreachable, wrong port, or firewalled)" % elapsed_ms)
-		get_tree().quit(1)
-		return
-	_log("CLIENT  connected_to_server fired after %dms (unique_id=%d)" % [elapsed_ms, multiplayer.get_unique_id()])
-
 	var monitor := Monitor.new()
+	monitor.t0 = t0
 	get_tree().root.add_child(monitor)
 
+	# Fixed flow: load Arena immediately, the same way the host already does,
+	# instead of waiting for connected_to_server first - see MainMenu.gd.
 	get_tree().change_scene_to_file("res://scenes/world/Arena.tscn")
 	# `self` may be freed any moment now - nothing after this point in THIS
 	# node is safe to run. Monitor.new() already took over.
 
 class Monitor extends Node:
+	var t0: int = 0
+
 	static func _log(line: String) -> void:
 		print(line)
 		var f := FileAccess.open(LOG_PATH, FileAccess.READ_WRITE if FileAccess.file_exists(LOG_PATH) else FileAccess.WRITE)
@@ -83,8 +62,30 @@ class Monitor extends Node:
 			f.seek_end(); f.store_line(line); f.close()
 
 	func _ready() -> void:
-		await get_tree().process_frame
-		await get_tree().process_frame
+		var connected: bool = false
+		var failed: bool = false
+		NetworkManager.connected_to_server.connect(func(): connected = true)
+		NetworkManager.connection_failed.connect(func(): failed = true)
+
+		# Wall-clock timeout, not a fixed frame count: headless runs uncapped
+		# and unpredictably fast, so a frame budget doesn't reflect real
+		# elapsed time. 25s is generous - the host side of this handshake
+		# reliably registers the peer within ~9s (see NetHostProbe.gd).
+		while Time.get_ticks_msec() - t0 < 25000:
+			await get_tree().process_frame
+			if connected or failed:
+				break
+		var elapsed_ms: int = Time.get_ticks_msec() - t0
+
+		if failed:
+			_log("CLIENT  connection_failed after %dms" % elapsed_ms)
+			get_tree().quit(1)
+			return
+		if not connected:
+			_log("CLIENT  TIMED OUT after %dms waiting for connected_to_server (host unreachable, wrong port, or firewalled)" % elapsed_ms)
+			get_tree().quit(1)
+			return
+		_log("CLIENT  connected_to_server fired after %dms (unique_id=%d)" % [elapsed_ms, get_tree().get_multiplayer().get_unique_id()])
 
 		# Wait for the server to replicate: our own spawned Player (via
 		# MultiplayerSpawner, server-authoritative) and the host's own player.

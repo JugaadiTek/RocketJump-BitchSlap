@@ -79,8 +79,16 @@ func _on_connected_to_server() -> void:
 	player_joined.emit(multiplayer.get_unique_id())
 
 func _on_connection_failed() -> void:
-	is_online = false
+	disconnect_game()
 	connection_failed.emit()
+	# The client jumps straight into the Arena scene as soon as it starts
+	# connecting (see MainMenu._on_join_pressed()) rather than waiting here
+	# first - MainMenu is already gone by the time this can fire, so nothing
+	# else is left to send the player back to it on a failed/dropped
+	# connection.
+	var tree: SceneTree = Engine.get_main_loop() as SceneTree
+	if tree:
+		tree.change_scene_to_file("res://scenes/ui/MainMenu.tscn")
 
 func _on_server_disconnected() -> void:
 	is_online = false

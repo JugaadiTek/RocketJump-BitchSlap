@@ -7,6 +7,80 @@ in [`tests/`](../tests) — see **Test harness** at the bottom.
 
 ---
 
+## 2026-08-13 — Session 16: multiplayer join fix attempted - real bug fixed, but NOT the one blocking connections
+
+Follow-up to Session 15, asked to fix what was found there. Two distinct
+results: one real bug fixed (worth keeping), and one deeper, still-open
+problem this session traced down to below the game's own code.
+
+### Fixed: client no longer races the server's replication of existing world state
+Session 15's diagnosis - the client waiting for `connected_to_server` before
+loading Arena, while the server (which already has itself and any bots
+spawned) starts replicating that existing state to a newly-registered peer
+using absolute `Arena/...` paths that don't exist on a client still sitting
+on MainMenu - was a real, reproducible hazard. Fixed by loading Arena
+immediately on join, the same way the host already does, instead of
+gating it behind `connected_to_server`:
+`MainMenu._on_join_pressed()` now calls `change_scene_to_file` right after
+`NetworkManager.join_game()`, not from a signal callback that may fire long
+after MainMenu itself is gone. Since MainMenu is gone by the time a
+connection genuinely fails, `NetworkManager._on_connection_failed()` now
+owns routing back to MainMenu itself (`disconnect_game()` +
+`change_scene_to_file`), rather than a dead `status_label` reference on a
+freed node. This is real and worth keeping regardless of the section below -
+it removes a genuine ordering hazard.
+[scripts/ui/MainMenu.gd](../scripts/ui/MainMenu.gd),
+[scripts/autoload/NetworkManager.gd](../scripts/autoload/NetworkManager.gd)
+
+### Correction: that wasn't what was actually blocking the connection
+Re-ran the two-process test with the fix applied - the client's log no
+longer floods with `Node not found: Arena/BotSpawner` (confirms the race
+above was real and is gone), but `connected_to_server` **still** never
+fired. So the fix above, while correct, wasn't the actual blocker Session 15
+measured. Chased it further with a pair of new probes
+(`NetMinHost.gd`/`NetMinClient.gd`) that strip away every scrap of this
+project's own code - no Arena, no NetworkManager, no MainMenu, just a bare
+`ENetMultiplayerPeer.create_server()`/`create_client()` pair - to find out
+whether the problem was even in this codebase at all.
+
+It isn't. The minimal client's own connection status
+(`peer.get_connection_status()`) goes CONNECTING -> **CONNECTED within
+~10-16ms** - then `server_disconnected` fires and status drops back to
+DISCONNECTED at a suspiciously exact **~1000ms**, every single run, and
+never recovers for the rest of a 25s window. Meanwhile the minimal host
+doesn't see `peer_connected` until **~7-9 seconds** later - consistent with
+Session 15's original numbers, and with what looks like ENet silently
+retrying the handshake under the hood after that first attempt's local
+"connected" state gets torn down, but Godot's high-level
+`connected_to_server` signal never firing for whatever eventually succeeds.
+Reproduced identically over `127.0.0.1` AND this machine's real LAN IP
+(192.168.0.149) - ruling out a loopback-specific quirk.
+
+This is now confirmed to be below this project's own code - an ENet/Godot
+engine-level handshake issue, or something specific to this sandboxed dev
+environment's network stack (a hypervisor's virtual adapter, or Windows
+Defender's real-time protection - confirmed active
+(`Get-MpComputerStatus`) - holding and resetting a brand-new UDP flow around
+the 1s mark is a very plausible match for exactly this pattern, though not
+confirmed as the cause). Windows Firewall itself was checked and ruled out:
+existing inbound Allow rules already cover Godot Engine for UDP+TCP on the
+active Public network profile, and loopback traffic bypasses Windows
+Firewall filtering entirely regardless.
+
+**Not fixable by editing this game's scripts** - there's no game code left
+in the failing path once you're down to two bare `ENetMultiplayerPeer`
+objects. Next step has to be testing outside this sandbox: two genuinely
+separate machines (or at minimum this same test on a different host
+OS/network stack), to tell apart "Godot/ENet bug" from "this specific
+sandboxed environment." `NetMinHost.gd`/`NetMinClient.gd` are kept as
+permanent, code-free connectivity probes for exactly that follow-up.
+[tests/NetMinHost.gd](../tests/NetMinHost.gd) (new),
+[tests/NetMinClient.gd](../tests/NetMinClient.gd) (new),
+[tests/NetHostProbe.gd](../tests/NetHostProbe.gd),
+[tests/NetClientProbe.gd](../tests/NetClientProbe.gd)
+
+---
+
 ## 2026-08-13 — Session 15: multiplayer connection verification - CRITICAL join bug found, not fixed
 
 Requested: verify multiplayer connections over the internet. Two honest
@@ -1312,6 +1386,15 @@ start first:
 ```
 Godot --headless --path . res://tests/NetHostProbe.tscn -- 7777          # first, own process
 Godot --headless --path . res://tests/NetClientProbe.tscn -- 127.0.0.1 7777   # second, own process
+```
+
+`NetMinHost.tscn`/`NetMinClient.tscn` (Session 16) are the same pairing but
+with every scrap of this project's own code stripped out - bare
+`ENetMultiplayerPeer` only - for telling apart "bug in this codebase" from
+"bug below it" the way Session 16 did:
+```
+Godot --headless --path . res://tests/NetMinHost.tscn -- 7777
+Godot --headless --path . res://tests/NetMinClient.tscn -- 127.0.0.1 7777
 ```
 
 Results are also written to `/tmp/rjbs_*.log`, flushed per line — a run that has

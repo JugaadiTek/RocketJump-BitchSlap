@@ -38,18 +38,41 @@ func _on_host_pressed() -> void:
 		return
 	get_tree().change_scene_to_file(ARENA_SCENE_PATH)
 
+## The client used to wait right here for NetworkManager.connected_to_server
+## before ever loading Arena - which reliably never fired. The real ENet
+## handshake takes several seconds, and the moment the low-level connection
+## registers, the SERVER starts replicating its already-spawned nodes
+## (itself, any bots) to the new peer via absolute paths under
+## "Arena/...". A client still sitting on MainMenu has no "Arena" node at
+## all yet, so every one of those replication messages resolved to nothing
+## ("Node not found: Arena/BotSpawner") - and that appears to be exactly
+## what stalled the connection-completion handshake itself, not just spammed
+## harmless errors: confirmed via tests/NetHostProbe.gd + NetClientProbe.gd,
+## the host's side completed and replicated a player for the peer every
+## single time, but connected_to_server never fired on the client, even
+## given 60 real seconds.
+##
+## Fix: load Arena immediately, the same way _on_host_pressed() already
+## does, instead of waiting for the connection to finish first - so the
+## matching node paths already exist by the time the server's replication
+## traffic arrives, whenever that turns out to be. connected_to_server no
+## longer needs to do anything (this scene will already be long gone by the
+## time it fires); a failed connection is handled by
+## NetworkManager._on_connection_failed(), which - since this scene won't be
+## around to hear about it either - routes back to MainMenu itself.
 func _on_join_pressed() -> void:
 	_apply_options()
 	var address: String = ip_field.text.strip_edges()
 	if address.is_empty():
 		address = "127.0.0.1"
-	status_label.text = "Connecting to %s..." % address
 	var err: Error = NetworkManager.join_game(address, _get_port())
 	if err != OK:
 		status_label.text = "Invalid address"
+		return
+	get_tree().change_scene_to_file(ARENA_SCENE_PATH)
 
 func _on_connected_to_server() -> void:
-	get_tree().change_scene_to_file(ARENA_SCENE_PATH)
+	pass  # already in Arena by now - see _on_join_pressed()
 
 func _on_connection_failed() -> void:
 	status_label.text = "Connection failed."
