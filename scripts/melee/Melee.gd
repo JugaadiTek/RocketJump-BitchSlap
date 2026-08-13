@@ -169,6 +169,12 @@ func _resolve_hit(target: Player) -> void:
 	var target_pos: Vector3 = target.global_position
 	var target_basis: Basis = target.global_transform.basis
 
+	# Gunship takeover: check BEFORE the kill lands, since target.player_id is
+	# what identifies them in Gunship.driver_id, not anything the corpse still
+	# carries afterward. driver_id is synced (MultiplayerSynchronizer), so
+	# every peer - not just the driver's own client - can see this.
+	var driven_ship: Gunship = _find_gunship_driven_by(target.player_id)
+
 	# Kill: massive damage so it always overkills regardless of current health.
 	var lethal_damage: float = target.max_health * 10.0
 	if target.is_multiplayer_authority():
@@ -177,6 +183,28 @@ func _resolve_hit(target: Player) -> void:
 		target.rpc_id(target.get_multiplayer_authority(), "network_apply_damage", lethal_damage, _player.get_path(), target_pos, "The Bitchslap")
 
 	_broadcast_spawn_corpse.rpc(target_pos, target_basis, impulse)
+
+	if driven_ship != null:
+		# "After the death animation" - the corpse launch/spin the RPC above
+		# just kicked off. Gunship.force_takeover() sets driver_id
+		# unconditionally, so this wins the seat regardless of whether
+		# Player._die()'s own eviction (driver_id -> -1, since dying while
+		# mounted empties the seat generically) has already run by the time
+		# this fires - see Player._die()'s own comment for the other half.
+		var t: SceneTreeTimer = get_tree().create_timer(1.2)
+		t.timeout.connect(func():
+			if is_instance_valid(driven_ship):
+				driven_ship.force_takeover(_player.player_id))
+
+## Scans the (always small, usually empty or size-1) "gunships" group rather
+## than trusting the target's own mounted_gunship - that var is only ever
+## accurate on the driver's OWN client, but driver_id is synced to everyone.
+func _find_gunship_driven_by(pid: int) -> Gunship:
+	for node in get_tree().get_nodes_in_group("gunships"):
+		var ship: Gunship = node as Gunship
+		if ship and is_instance_valid(ship) and not ship.is_destroyed and ship.driver_id == pid:
+			return ship
+	return null
 
 @rpc("any_peer", "call_local", "reliable")
 func _broadcast_spawn_corpse(pos: Vector3, basis: Basis, impulse: Vector3) -> void:

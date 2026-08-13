@@ -306,5 +306,6 @@ func _wants_fire() -> bool: return _ai_wants_fire
 func _wants_aim() -> bool: return false
 func _wants_scoreboard() -> bool: return false
 func _wants_melee() -> bool: return _ai_wants_melee
+func _wants_interact() -> bool: return false ## bots never crew the Gunship
 func _get_weapon_switch() -> int: return _ai_weapon_index
 func _get_weapon_scroll() -> int: return 0

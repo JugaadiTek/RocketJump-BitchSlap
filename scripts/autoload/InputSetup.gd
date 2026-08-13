@@ -23,6 +23,7 @@ const KEY_ACTIONS: Dictionary = {
 	"jump": KEY_SPACE,
 	"crouch": KEY_CTRL,
 	"melee": KEY_V,  ## matches Player._wants_melee()'s hardcoded key; was KEY_F, which nothing else ever agreed with
+	"interact": KEY_E,  ## mount/dismount the Gunship's driver seat - see Player._wants_interact()
 	"weapon_rocket": KEY_1,
 	"weapon_railgun": KEY_2,
 	"weapon_slug": KEY_3,

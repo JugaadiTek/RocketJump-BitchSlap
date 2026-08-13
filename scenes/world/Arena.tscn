@@ -1,4 +1,4 @@
-[gd_scene load_steps=14 format=3]
+[gd_scene load_steps=16 format=3]
 
 [ext_resource type="Script" path="res://scripts/world/Arena.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/world/OrbitalBody.tscn" id="2"]
@@ -12,6 +12,8 @@
 [ext_resource type="PackedScene" path="res://scenes/world/Bunker.tscn" id="10"]
 [ext_resource type="PackedScene" path="res://scenes/world/HealthPack.tscn" id="11"]
 [ext_resource type="PackedScene" path="res://scenes/world/Turret.tscn" id="12"]
+[ext_resource type="Script" path="res://scripts/world/GunshipDirector.gd" id="13"]
+[ext_resource type="PackedScene" path="res://scenes/world/Gunship.tscn" id="14"]
 
 [node name="Arena" type="Node3D"]
 script = ExtResource("1")
@@ -53,3 +55,13 @@ spawn_path = NodePath("../Players")
 [node name="BotSpawner" type="MultiplayerSpawner" parent="."]
 _spawnable_scenes = PackedStringArray("res://scenes/npc/Bot.tscn")
 spawn_path = NodePath("../Bots")
+
+[node name="Gunships" type="Node3D" parent="."]
+
+[node name="GunshipDirector" type="Node" parent="."]
+script = ExtResource("13")
+gunship_scene = ExtResource("14")
+
+[node name="GunshipSpawner" type="MultiplayerSpawner" parent="GunshipDirector"]
+_spawnable_scenes = PackedStringArray("res://scenes/world/Gunship.tscn")
+spawn_path = NodePath("../../Gunships")

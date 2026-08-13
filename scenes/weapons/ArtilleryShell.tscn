@@ -1,0 +1,51 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/weapons/ArtilleryShell.gd" id="1"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_1"]
+radius = 0.35
+height = 1.6
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_body"]
+top_radius = 0.3
+bottom_radius = 0.34
+height = 1.3
+radial_segments = 10
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_nose"]
+top_radius = 0.02
+bottom_radius = 0.3
+height = 0.45
+radial_segments = 10
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_body"]
+albedo_color = Color(0.85, 0.42, 0.08, 1)
+emission_enabled = true
+emission = Color(1, 0.45, 0.1, 1)
+emission_energy_multiplier = 3.0
+
+[node name="ArtilleryShell" type="CharacterBody3D"]
+collision_layer = 4
+collision_mask = 11
+gravity_multiplier = 1.0
+lifetime = 14.0
+script = ExtResource("1")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0, 0)
+shape = SubResource("CapsuleShape3D_1")
+
+[node name="Body" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0, 0.15)
+mesh = SubResource("CylinderMesh_body")
+surface_material_override/0 = SubResource("StandardMaterial3D_body")
+
+[node name="Nose" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0, -0.725)
+mesh = SubResource("CylinderMesh_nose")
+surface_material_override/0 = SubResource("StandardMaterial3D_body")
+
+[node name="OmniLight3D" type="OmniLight3D" parent="."]
+light_color = Color(1, 0.5, 0.15, 1)
+light_energy = 3.0
+omni_range = 7.0

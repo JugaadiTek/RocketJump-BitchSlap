@@ -103,6 +103,13 @@ var _frame_body: OrbitalBody = null
 var _platform_velocity: Vector3 = Vector3.ZERO
 ## The Ladder volume we're currently standing in, if any (set by Ladder.gd).
 var _ladder: Node3D = null
+## The Gunship whose driver seat we're currently in, if any. While set,
+## normal movement/weapon-fire input is replaced by _process_mounted() -
+## see Gunship.gd for what the seat actually grants (weapon control only,
+## never the ship's own flight).
+var mounted_gunship: Gunship = null
+## How close the seat marker has to be before interact mounts it.
+const GUNSHIP_MOUNT_RANGE: float = 5.0
 ## Eased "up", chasing the raw target from _get_up_direction() - see _smoothed_up.
 var _up_smoothed: Vector3 = Vector3.ZERO
 var _was_grounded: bool = true
@@ -207,33 +214,40 @@ func _physics_process(delta: float) -> void:
 	if is_dead:
 		return
 
-	current_gravity = GravityManager.get_gravity_at(global_position)
-	_update_planet_frame(delta)
-	var new_up: Vector3 = _smoothed_up(delta)
-	_align_body_to_up(new_up, delta)
-	up_direction = new_up
+	if _wants_interact():
+		_handle_interact_pressed()
+	_sync_gunship_mount_state()
 
-	var flying: bool = _is_flight_mode()
-	var climbing: bool = _is_on_ladder() and not flying
-	if _impulse_grace_remaining > 0.0:
-		_impulse_grace_remaining -= delta
-	elif not flying and not climbing:
-		_apply_ground_stick(delta)
-	_apply_arena_bounds()
-
-	_apply_aim(delta)
-	_apply_look(delta)
-	if flying:
-		_apply_flight_movement(new_up, delta)
-	elif climbing:
-		_apply_ladder_movement(delta)
+	if mounted_gunship != null:
+		_process_mounted(delta)
 	else:
-		_apply_movement(new_up, delta)
+		current_gravity = GravityManager.get_gravity_at(global_position)
+		_update_planet_frame(delta)
+		var new_up: Vector3 = _smoothed_up(delta)
+		_align_body_to_up(new_up, delta)
+		up_direction = new_up
 
-	if _wants_melee():
-		melee.try_activate()
-	if not _is_spawning():
-		weapon_manager.handle_input(delta, _wants_fire(), _get_weapon_switch(), _get_weapon_scroll())
+		var flying: bool = _is_flight_mode()
+		var climbing: bool = _is_on_ladder() and not flying
+		if _impulse_grace_remaining > 0.0:
+			_impulse_grace_remaining -= delta
+		elif not flying and not climbing:
+			_apply_ground_stick(delta)
+		_apply_arena_bounds()
+
+		_apply_aim(delta)
+		_apply_look(delta)
+		if flying:
+			_apply_flight_movement(new_up, delta)
+		elif climbing:
+			_apply_ladder_movement(delta)
+		else:
+			_apply_movement(new_up, delta)
+
+		if _wants_melee():
+			melee.try_activate()
+		if not _is_spawning():
+			weapon_manager.handle_input(delta, _wants_fire(), _get_weapon_switch(), _get_weapon_scroll())
 
 	if hud:
 		hud.update_health(health, max_health)
@@ -261,6 +275,87 @@ func _physics_process(delta: float) -> void:
 		# body an inbound Planet Buster shell has locked (get_frame_body() is
 		# null while airborne/in space, so leaving the surface clears it).
 		hud.update_planet_threat_warning(_frame_body != null and is_instance_valid(_frame_body) and _frame_body.is_under_threat())
+		hud.update_gunship_target(_aimed_gunship())
+
+## ---- Gunship driver seat --------------------------------------------------
+
+func _handle_interact_pressed() -> void:
+	if mounted_gunship != null:
+		mounted_gunship.request_dismount(player_id)
+	else:
+		var ship: Gunship = _nearby_mountable_gunship()
+		if ship:
+			ship.request_mount(get_path())
+
+## mounted_gunship always mirrors the synced, server-authoritative driver_id
+## rather than being set optimistically the moment interact is pressed -
+## request_mount/request_dismount only ever ASK; this is what actually grants
+## or revokes the seat locally, so it can't desync from what every other peer
+## agrees is true (including the bitchslap-takeover and death-while-mounted
+## cases, which change driver_id without this player ever pressing anything).
+func _sync_gunship_mount_state() -> void:
+	if mounted_gunship != null:
+		if not is_instance_valid(mounted_gunship) or mounted_gunship.is_destroyed or mounted_gunship.driver_id != player_id:
+			mounted_gunship = null
+		return
+	for node in get_tree().get_nodes_in_group("gunships"):
+		var ship: Gunship = node as Gunship
+		if ship and is_instance_valid(ship) and not ship.is_destroyed and ship.driver_id == player_id:
+			mounted_gunship = ship
+			return
+
+## Any gunship whose seat is both empty and within GUNSHIP_MOUNT_RANGE -
+## interact does nothing if there's no seat close enough, same as every other
+## proximity-gated pickup/pad in this project just silently no-ops out of range.
+func _nearby_mountable_gunship() -> Gunship:
+	for node in get_tree().get_nodes_in_group("gunships"):
+		var ship: Gunship = node as Gunship
+		if ship == null or not is_instance_valid(ship) or ship.is_destroyed or ship.has_driver():
+			continue
+		if global_position.distance_to(ship.seat_marker.global_position) <= GUNSHIP_MOUNT_RANGE:
+			return ship
+	return null
+
+## Called every physics frame while mounted, in place of the normal
+## gravity/movement/weapon block - see Gunship.gd's own docstring for why
+## this only ever grants weapon control, never the ship's own flight.
+## Position is pinned to the seat every frame; rotation is NOT touched here,
+## so _apply_look() below still gives free look exactly like normal, it just
+## can't drift the seat itself anywhere.
+func _process_mounted(delta: float) -> void:
+	if not is_instance_valid(mounted_gunship) or mounted_gunship.is_destroyed or mounted_gunship.driver_id != player_id:
+		_dismount()
+		return
+	up_direction = mounted_gunship.global_transform.basis.y
+	_align_body_to_up(up_direction, delta)
+	_apply_look(delta)
+	global_position = mounted_gunship.seat_marker.global_position
+	velocity = Vector3.ZERO
+	if _wants_fire():
+		mounted_gunship.request_fire_artillery(player_id, camera.global_position, get_look_direction())
+
+func _dismount() -> void:
+	mounted_gunship = null
+
+## What HUD.update_gunship_target() shows a health bar for - whichever
+## gunship is directly under the crosshair right now, mounted or not (a
+## driver painting a planet still wants to see the hull's own health, and a
+## bystander lining up a shot needs it even more).
+func _aimed_gunship() -> Gunship:
+	if camera == null:
+		return null
+	var space_state := get_world_3d().direct_space_state
+	var from: Vector3 = camera.global_position
+	var to: Vector3 = from + (-camera.global_transform.basis.z) * 400.0
+	var query := PhysicsRayQueryParameters3D.create(from, to)
+	query.collision_mask = 1
+	var result: Dictionary = space_state.intersect_ray(query)
+	if result.is_empty():
+		return null
+	var collider: Object = result.collider
+	if collider is StaticBody3D and (collider as StaticBody3D).has_meta("gunship"):
+		return collider.get_meta("gunship")
+	return null
 
 ## Picks the planet we're currently "on" and rides it.
 ##
@@ -664,6 +759,12 @@ func _wants_scoreboard() -> bool:
 func _wants_melee() -> bool:
 	return _just_pressed("melee", Input.is_physical_key_pressed(KEY_V))
 
+## Mount/dismount the Gunship driver seat. Bot overrides this to false - bots
+## don't crew the gunship, same scope cut as several other advanced player
+## actions they never attempt.
+func _wants_interact() -> bool:
+	return _just_pressed("interact", Input.is_physical_key_pressed(KEY_E))
+
 func _get_weapon_switch() -> int:
 	if _just_pressed("wpn0", Input.is_physical_key_pressed(KEY_1)):
 		return 0
@@ -744,6 +845,15 @@ func _die(instigator: Node, weapon_name: String) -> void:
 	visible = false
 	collision_layer = 0
 	collision_mask = 1 # still collides with world/planets so we don't fall through, but hits nothing else
+	# Dying in the driver seat empties it - otherwise a plain rocket kill (not
+	# a bitchslap) would leave the seat permanently claimed by a corpse no one
+	# can ever bitchslap free (Melee.try_activate refuses a dead target).
+	# Gunship._network_request_dismount only actually clears driver_id if it
+	# still names THIS player at the moment it runs, so this can never
+	# clobber a bitchslap takeover that already reassigned the seat first -
+	# see Melee._resolve_hit for that half of the sequencing.
+	if mounted_gunship != null and is_instance_valid(mounted_gunship):
+		mounted_gunship.request_dismount(player_id)
 	var killer_id: int = -1
 	if instigator and "player_id" in instigator:
 		killer_id = instigator.player_id

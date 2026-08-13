@@ -146,6 +146,123 @@ AI-FLEE bot on threatened Cinder: state after retarget=2 (FLEE=2) weapon=4 (WEAP
 ```
 [tests/WeaponProbe.gd](../tests/WeaponProbe.gd), [tests/AIProbe.gd](../tests/AIProbe.gd)
 
+### New feature: Artillery Gunship
+A very large, black capital ship that enters the arena on its own autopilot
+for players to fight over, crew, and turn against the planets themselves.
+
+- **Entity & spawn cadence.** [Gunship.gd](../scripts/world/Gunship.gd)/
+  [.tscn](../scenes/world/Gunship.tscn) - a `Node3D` root moving a child
+  `StaticBody3D` collider, same structure as `OrbitalBody`. Grappleable and
+  walkable for free (collision layer 1, same as planets/towers), and
+  destructible for free (`"damageable"` group + `apply_damage`, so every
+  existing weapon already works against it without any special-casing).
+  6000 HP. [GunshipDirector.gd](../scripts/world/GunshipDirector.gd) (a new
+  child of Arena) spawns one 2 minutes after the match starts, and another 2
+  minutes after the last one is gone - destroyed, or left (see below) -
+  never more than one at a time. Entry point is a real point on one of the
+  arena's six asymmetric boundary faces (`GravityManager.arena_bounds_min/
+  max`, the same technique `Spawner._random_boundary_point()` already uses),
+  **not** the single-sphere `arena_half_extent()` - that value is
+  deliberately the tightest of the six faces (its own doc comment says so),
+  which in this arena's mostly-equatorial orbital layout is squashed down
+  under 100 units by the thin Y axis alone; using it here would have spawned
+  every ship absurdly close to the centre. Caught and fixed via the probe
+  before it ever shipped.
+- **Autopilot: meanders and stays, pathfinds out if abandoned.** Reactive
+  steering, not a planned route - three blended pushes against the ship's
+  current heading: obstacle avoidance (always on, pushed clear of every
+  `OrbitalBody`'s own danger zone), boundary containment (pushes back inward
+  near any of the arena's six real faces - this is what makes it "stay"),
+  and escape (replaces containment with an outward push once **abandoned** -
+  had a driver, no longer does - turning the same loop into "heads for open
+  space" with no separate pathfinding system needed). Re-manning the seat
+  before it clears the boundary cancels the escape the very next physics
+  frame. A ship that's never been boarded stays in normal meander mode
+  rather than immediately trying to leave. Not replicated - every peer runs
+  the identical deterministic formula off already-synchronized `OrbitalBody`
+  positions, the same trust every orbiting body in this project already
+  relies on.
+- **Health bar HUD.** New `GunshipHealthPanel` in
+  [HUD.tscn](../scenes/ui/HUD.tscn)/[HUD.gd](../scripts/ui/HUD.gd) - shown
+  on **any** player's screen whenever their own crosshair is on the hull
+  (`Player._aimed_gunship()`, a plain raycast against collision layer 1
+  checking for the `"gunship"` meta `OrbitalBody` already sets its own
+  `"orbital_body"` meta the same way), reading the one synced `health` value
+  everyone agrees on - not something only whoever "tagged" it first gets.
+- **Driver seat.** Walk up to the seat (within 5m) and press **E**
+  (`"interact"`, new in [InputSetup.gd](../scripts/autoload/InputSetup.gd))
+  to mount; **E** again to leave. Grants weapon control only, never the
+  ship's own flight, exactly as asked - `Player._process_mounted()` pins
+  position to the seat every frame but leaves rotation to the normal
+  `_apply_look()` call right alongside it, so free look still works.
+  `mounted_gunship` always mirrors the synced, server-authoritative
+  `driver_id` rather than being set optimistically the moment E is pressed,
+  so it can't desync from what every peer agrees is true - including the two
+  cases that change who's driving without that player ever pressing
+  anything: dying while mounted (`Player._die()` now evicts), and the
+  takeover below.
+- **Bitchslap takeover.** `Melee._resolve_hit()` checks (before the kill
+  lands) whether the target is currently in a `"gunships"`-group ship's
+  seat, and if so, ~1.2s after ("after the death animation") force-assigns
+  the seat to the attacker - `Gunship.force_takeover()` sets `driver_id`
+  unconditionally, so it wins the seat regardless of whether the normal
+  death-eviction above already ran first (that eviction only clears
+  `driver_id` if it still names the dying player at the moment it executes,
+  so it can never claw the seat back from an attacker who already took it).
+- **Artillery.** Firing from the seat raycasts the driver's own aim
+  (excluding the ship's own hull - the seat sits close enough to the deck
+  that a shallow aim angle was clipping it before ever reaching a planet,
+  caught by the probe showing 0 markers painted) against whatever planet is
+  under the crosshair, paints 3 scattered `ArtilleryMarker` spots on its
+  surface (parented to the `OrbitalBody`, so they travel with its orbit and
+  are visible to everyone, not just the driver), and 15s later allows
+  another burst. After a 1s telegraph beat, an `ArtilleryShell` per marker
+  launches from the muzzle at real physics (`affected_by_gravity` stays
+  true, unlike the Planet Buster's shell) so it genuinely arcs, with a
+  gentle ramping homing correction (same terminal-guidance-guarantees-a-hit
+  lesson `PlanetBusterProjectile`'s own miss-fix already established)
+  keeping real multi-body gravity from carrying it off the mark. Launch
+  speed and lifetime are both generous (90 m/s, 26s) - a ship can spawn on
+  one boundary face while its driver paints a planet clear across the arena
+  near the centre, and the first tuning pass (20 m/s, 14s) reliably timed
+  out before ever arriving, which the probe also caught (0/3 orbit
+  perturbations - shells were expiring in open space, never touching a
+  planet at all). On impact: 5x a `Rocket`'s own blast radius, planet
+  deformation (`OrbitalBody.apply_crater`) and a real orbit kick
+  (`perturb_orbit`, stronger than a direct rocket hit), splash damage to
+  anything caught in it, and a proper nuke - bright flash, expanding
+  shockwave ring (`TorusMesh`), and a rising-column-then-spreading-cap
+  mushroom cloud, all primitives/particles/tweens, same convention as every
+  other explosion in this project.
+[scripts/world/Gunship.gd](../scripts/world/Gunship.gd),
+[scripts/world/GunshipDirector.gd](../scripts/world/GunshipDirector.gd),
+[scripts/weapons/ArtilleryShell.gd](../scripts/weapons/ArtilleryShell.gd),
+[scripts/world/ArtilleryMarker.gd](../scripts/world/ArtilleryMarker.gd),
+[scripts/player/Player.gd](../scripts/player/Player.gd),
+[scripts/melee/Melee.gd](../scripts/melee/Melee.gd)
+
+Known, deliberate scope cut, documented rather than left silent: standing on
+the hull while it moves/turns does not carry a player along the way an
+`OrbitalBody` does (no `motion_delta` rider system for this one) - at its
+tuned cruise speed (6 m/s) and turn rate (12 deg/s) that reads as a faint
+drift underfoot, not being thrown off.
+
+Verified end-to-end with a new permanent probe:
+```
+SPAWN   gunship spawned at (315.9806, 33.06009, 58.10129), health=6000/6000
+SPAWN   aimed straight at Halcyon (radius 36): closest approach over 400 frames = 60.3m (avoidance held if > 0)
+ROAM    unmanned near boundary: containment push points inward=true -> heading curves away over 5s=true, stays within boundary=true (still alive=true) | after being manned then abandoned: is_abandoned=true, push now points outward=true | abandoned + past boundary despawns=true
+ROAM    re-mounting an abandoned ship: was abandoned=true -> re-manned cancels it=true
+DAMAGE  health 6000 -> 5500 after 500dmg (still alive=true) -> destroyed after lethal hit=true -> node freed ~2.5s later=true
+MOUNT   seat empty before=true -> request_mount grants driver_id=true, player's own mounted_gunship updates=true
+ARTILLERY fired at Cinder: markers painted=3/3 | immediate re-fire blocked by cooldown=true | markers cleared after shells resolve=true | orbit perturbed=true
+TAKEOVER victim seated before slap=true -> bitchslapped (died=true) -> seat now held by attacker=true
+```
+Plus a full clean pass of `WeaponProbe`/`MovementProbe`/`WorldProbe`/
+`CombatProbe`/`AIProbe` and a 300-frame live-Arena boot check with
+`GunshipDirector` active, all against the real Godot 4.7 binary.
+[tests/GunshipProbe.gd](../tests/GunshipProbe.gd)
+
 ---
 
 ## 2026-08-13 — Session 16: multiplayer join fix attempted - real bug fixed, but NOT the one blocking connections
@@ -1516,6 +1633,7 @@ rather than pass/fail, so regressions show up as changed numbers.
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path . res://tests/WorldProbe.tscn      # layout, buildings, ladders, spawn, craters, health, spin, impacts, tower height range, planet shader, boundary vs. spawn, ladder death
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path . res://tests/CombatProbe.tscn     # boundary, tower walls, headshots, death/gore, slime, asteroids, audio, announcements
 /Applications/Godot.app/Contents/MacOS/Godot --headless --path . res://tests/AIProbe.tscn          # bot AI raycast cost, GravityManager call cost, uncoalesced deform, skull texture, scoreboard sort (Session 12)
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path . res://tests/GunshipProbe.tscn     # Gunship spawn/avoidance, boundary roam+abandon+leave, damage/destruction, mount/dismount, artillery burst+blast+deform+orbit, bitchslap takeover (Session 17)
 ```
 
 `PerfProbe.tscn` and `LoadProbe.tscn` (see Session 6/12 above) need a real

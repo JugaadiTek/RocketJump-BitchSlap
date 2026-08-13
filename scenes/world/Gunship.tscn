@@ -1,0 +1,59 @@
+[gd_scene load_steps=9 format=3]
+
+[ext_resource type="Script" path="res://scripts/world/Gunship.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/weapons/ArtilleryShell.tscn" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/world/ArtilleryMarker.tscn" id="3"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_hull"]
+size = Vector3(72.0, 16.0, 26.0)
+
+[sub_resource type="BoxMesh" id="BoxMesh_hull"]
+size = Vector3(72.0, 16.0, 26.0)
+
+[sub_resource type="BoxMesh" id="BoxMesh_bridge"]
+size = Vector3(14.0, 9.0, 14.0)
+
+[sub_resource type="BoxMesh" id="BoxMesh_pod"]
+size = Vector3(20.0, 8.0, 6.0)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_hull"]
+albedo_color = Color(0.045, 0.045, 0.055, 1)
+roughness = 0.75
+metallic = 0.3
+
+[node name="Gunship" type="Node3D"]
+script = ExtResource("1")
+artillery_scene = ExtResource("2")
+marker_scene = ExtResource("3")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="."]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="StaticBody3D"]
+shape = SubResource("BoxShape3D_hull")
+
+[node name="Hull" type="MeshInstance3D" parent="StaticBody3D"]
+mesh = SubResource("BoxMesh_hull")
+surface_material_override/0 = SubResource("StandardMaterial3D_hull")
+
+[node name="Bridge" type="MeshInstance3D" parent="StaticBody3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -18.0, 12.5, 0)
+mesh = SubResource("BoxMesh_bridge")
+surface_material_override/0 = SubResource("StandardMaterial3D_hull")
+
+[node name="PortPod" type="MeshInstance3D" parent="StaticBody3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10.0, -2.0, 14.0)
+mesh = SubResource("BoxMesh_pod")
+surface_material_override/0 = SubResource("StandardMaterial3D_hull")
+
+[node name="StarPod" type="MeshInstance3D" parent="StaticBody3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10.0, -2.0, -14.0)
+mesh = SubResource("BoxMesh_pod")
+surface_material_override/0 = SubResource("StandardMaterial3D_hull")
+
+[node name="SeatMarker" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -18.0, 17.5, 0)
+
+[node name="Muzzle" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -18.0, 19.0, 0)
+
+[node name="MultiplayerSynchronizer" type="MultiplayerSynchronizer" parent="."]

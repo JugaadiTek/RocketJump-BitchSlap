@@ -16,6 +16,9 @@ extends CanvasLayer
 @onready var lock_indicator: Control = $Root/LockIndicator
 @onready var scope_overlay: ColorRect = $Root/ScopeOverlay
 @onready var planet_threat_warning: Label = $Root/PlanetThreatWarning
+@onready var gunship_health_panel: Control = $Root/GunshipHealthPanel
+@onready var gunship_health_bar: ProgressBar = $Root/GunshipHealthPanel/HealthBar
+@onready var gunship_name_label: Label = $Root/GunshipHealthPanel/NameLabel
 
 
 var _my_player_id: int = -1
@@ -159,3 +162,16 @@ func update_planet_threat_warning(active: bool) -> void:
 		return
 	planet_threat_warning.visible = active
 	_threat_pulse_time = 0.0
+
+## Called from Player each frame with whatever Gunship is currently under the
+## crosshair (see Player._aimed_gunship()), or null. A boss-style health bar:
+## every player sees it - driver, attacker, or bystander - whenever their own
+## crosshair is on the hull, all reading the same synced health value
+## (Gunship.health), not something only the person who "tagged" it gets.
+func update_gunship_target(gunship: Gunship) -> void:
+	gunship_health_panel.visible = gunship != null and is_instance_valid(gunship)
+	if not gunship_health_panel.visible:
+		return
+	gunship_health_bar.max_value = gunship.max_health
+	gunship_health_bar.value = gunship.health
+	gunship_name_label.text = gunship.display_name.to_upper()
