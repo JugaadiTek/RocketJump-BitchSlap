@@ -257,6 +257,10 @@ func _physics_process(delta: float) -> void:
 			pass  # Spawner calls hud.update_spawn_aim directly
 		else:
 			hud.hide_spawn_aim()
+		# "Planet Destruction Imminent" - only while actually standing on the
+		# body an inbound Planet Buster shell has locked (get_frame_body() is
+		# null while airborne/in space, so leaving the surface clears it).
+		hud.update_planet_threat_warning(_frame_body != null and is_instance_valid(_frame_body) and _frame_body.is_under_threat())
 
 ## Picks the planet we're currently "on" and rides it.
 ##

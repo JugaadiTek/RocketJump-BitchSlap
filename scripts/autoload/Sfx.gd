@@ -177,6 +177,8 @@ func _synthesize(sound: String) -> AudioStreamWAV:
 			])
 		"jump_pad":
 			return _sound(_sweep(0.4, 200.0, 1100.0, 0.4, 2.2))
+		"siren_wail":
+			return _sound(_siren(1.6, 550.0, 950.0, 0.5))
 		"ui_click":
 			return _sound(_tone(0.07, 1400.0, 0.25, 22.0))
 		_:
@@ -227,6 +229,30 @@ func _tone(duration: float, hz: float, amplitude: float, decay: float) -> Packed
 		var env: float = exp(-decay * t)
 		var modulator: float = sin(TAU * hz * 1.5 * t) * 1.4 * env
 		out[i] = sin(TAU * hz * t + modulator) * env * amplitude
+	return out
+
+## Classic rise-then-fall air-raid wail: one full cycle of a sine whose own
+## frequency is swept by a slow LFO between low_hz and high_hz and back,
+## rather than _sweep()'s one-directional glide - a one-way glide reads as a
+## charging weapon (see railgun_charge), not an alarm. Re-triggered on a
+## fixed cadence by OrbitalBody._start_siren_audio rather than looped, same
+## as every other sound in this file.
+func _siren(duration: float, low_hz: float, high_hz: float, amplitude: float) -> PackedFloat32Array:
+	var count: int = int(duration * SAMPLE_RATE)
+	var out := PackedFloat32Array()
+	out.resize(count)
+	var phase: float = 0.0
+	for i in range(count):
+		var t: float = float(i) / float(SAMPLE_RATE)
+		var u: float = t / maxf(duration, 0.0001)
+		var lfo: float = 0.5 - 0.5 * cos(TAU * u)  # one full rise-and-fall across the clip
+		var freq: float = lerpf(low_hz, high_hz, lfo)
+		phase += TAU * freq / float(SAMPLE_RATE)
+		var wave: float = sin(phase)
+		# Fades past _pack()'s own short click-guard, wide enough that
+		# back-to-back retriggers don't stack an audible seam at the loop point.
+		var edge: float = minf(u, 1.0 - u) * 8.0
+		out[i] = wave * clampf(edge, 0.0, 1.0) * amplitude
 	return out
 
 ## Sums layers (padding to the longest), soft-clips, applies a short fade-in and

@@ -20,6 +20,11 @@ var lock_target: OrbitalBody = null
 var _exploded: bool = false
 var _course_dir: Vector3 = Vector3.ZERO
 var _course_timer: float = 0.0
+## The body this shell has warned, if any - tracked separately from
+## lock_target so _exit_tree() can always release the exact threat it added,
+## even in the (currently impossible, but cheap to guard against) case
+## lock_target were ever reassigned mid-flight.
+var _threatened_body: OrbitalBody = null
 
 ## The shell leaves the barrel at a deliberately slow 7 m/s (see PlanetBuster)
 ## and doesn't inherit the shooter's own velocity. A player moving forward at
@@ -37,6 +42,22 @@ func launch(initial_velocity: Vector3, shooter: Node) -> void:
 	super.launch(initial_velocity, shooter)
 	if shooter is CollisionObject3D:
 		add_collision_exception_with(shooter)
+	# "Planet Destruction Imminent" starts the moment a guided shell is
+	# actually in the air for this target, not while a player is merely
+	# holding the lock - see OrbitalBody.add_threat for what this drives
+	# (siren shader, siren wail, and Bot fleeing).
+	if lock_target != null and is_instance_valid(lock_target):
+		_threatened_body = lock_target
+		_threatened_body.add_threat()
+
+## Releases the threat this shell added, however its flight ended - a real
+## hit (shatter or splash), a miss that expired, or flying out of bounds.
+## Centralising it here (rather than in _on_hit and _expire both) means
+## there's exactly one place that can leak a stuck siren.
+func _exit_tree() -> void:
+	if _threatened_body != null and is_instance_valid(_threatened_body):
+		_threatened_body.remove_threat()
+	_threatened_body = null
 
 func _ready() -> void:
 	super._ready()

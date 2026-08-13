@@ -38,6 +38,7 @@ func _ready() -> void:
 	_bench_crater_vs_uncoalesced_deform()
 	_bench_skull_texture()
 	_bench_scoreboard_sort()
+	await _test_bot_flees_threatened_planet()
 	get_tree().quit()
 
 ## Bot._find_enemy() - O(bots) candidates, each short-circuited by distance
@@ -184,3 +185,35 @@ func _bench_scoreboard_sort() -> void:
 	for i in range(32):
 		MatchState.unregister_player(i)
 	MatchState.reset_scores()
+
+## IMPROVEMENT - a bot standing on a planet with an inbound Planet Buster
+## shell locked on drops whatever it's doing and flees (reaches for the Space
+## Board and flies straight off the surface) instead of fighting to the end.
+## Not a perf benchmark like the rest of this file, but this is where every
+## other Bot-behaviour check already lives.
+func _test_bot_flees_threatened_planet() -> void:
+	var bots: Array = _arena.get_node("Bots").get_children()
+	var bot: Bot = null
+	for b in bots:
+		if is_instance_valid(b) and not b.is_dead and b.get_frame_body() != null:
+			bot = b
+			break
+	if bot == null:
+		_log("AI-FLEE no live, grounded bot found to test")
+		return
+
+	var body: OrbitalBody = bot.get_frame_body()
+	var start_alt: float = bot.global_position.distance_to(body.global_position) - body.radius
+	body.add_threat()
+	# retarget_interval is 0.25s, plus up to a full interval of random phase
+	# offset (see Bot._ready()) - wait past the worst case before checking.
+	for i in range(45):
+		await get_tree().physics_frame
+	var state_after: Bot.AiState = bot._state
+	var weapon_after: int = bot._ai_weapon_index
+	for i in range(90):
+		await get_tree().physics_frame
+	var end_alt: float = bot.global_position.distance_to(body.global_position) - body.radius
+	body.remove_threat()
+	_log("AI-FLEE bot on threatened %s: state after retarget=%s (FLEE=%d) weapon=%d (WEAPON_BOARD=%d) | altitude %.1fm -> %.1fm (climbed=%s)" % [
+		body.name, state_after, Bot.AiState.FLEE, weapon_after, Bot.WEAPON_BOARD, start_alt, end_alt, end_alt > start_alt + 1.0])

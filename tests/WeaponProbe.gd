@@ -50,6 +50,7 @@ func _ready() -> void:
 	await _test_buster_lock_gate()
 	await _test_buster_shell()
 	await _test_buster_intercept_moving_target()
+	await _test_buster_threat_warning()
 	await _test_third_person_weapon()
 	await _test_scope()
 	await _test_scope_highlight()
@@ -319,6 +320,67 @@ func _test_buster_intercept_moving_target() -> void:
 		if is_instance_valid(shell):
 			shell.queue_free()
 	_log("BUSTER  intercept-vs-moving-target: %d/%d hit | %s" % [hits, cases.size(), ", ".join(results)])
+
+## IMPROVEMENT - "Planet Destruction Imminent": a shell in flight flags its
+## locked target as under threat (siren shader + wail on the OrbitalBody, a
+## HUD banner for anyone actually standing there) for the whole flight, and
+## clears it again once the shell resolves, whichever way.
+func _test_buster_threat_warning() -> void:
+	# Cinder (orbit_radius 130), not Halcyon (440) - Halcyon sits close enough
+	# to ARENA_BOUNDARY_RADIUS (535) that a launch offset of any real size can
+	# spawn the shell already out of bounds, expiring it on its very first
+	# frame (see _test_buster_shell's own note on the same hazard).
+	var target: OrbitalBody = _arena.get_node("OrbitalBodies/Cinder")
+	var scene: PackedScene = load("res://scenes/weapons/PlanetBusterProjectile.tscn")
+	var shell: PlanetBusterProjectile = scene.instantiate()
+	get_tree().current_scene.add_child(shell)
+	var offset: Vector3 = Vector3(1, 0.2, 0.3).normalized() * 200.0
+	shell.global_position = target.global_position + offset
+	shell.lock_target = target
+	shell.launch(-offset.normalized() * 7.0, null)
+	await get_tree().physics_frame
+
+	var mat: ShaderMaterial = target.mesh.get_surface_override_material(0)
+	var threatened_after_launch: bool = target.is_under_threat()
+	var siren_after_launch: float = mat.get_shader_parameter("siren_strength")
+
+	# A local player standing on the threatened body should see the warning;
+	# the same player standing somewhere else should not.
+	var pscene: PackedScene = load("res://scenes/player/Player.tscn")
+	var local: Player = pscene.instantiate()
+	local.set_script(ProbeLocalPlayer)
+	local.name = "ThreatLocal"
+	_arena.get_node("Players").add_child(local, true)
+	local.player_id = 231
+	await get_tree().physics_frame
+	local.disable_spawner()
+	local.global_position = target.global_position + Vector3(0, target.radius + 1.0, 0)
+	local.velocity = Vector3.ZERO
+	local.reset_frame()
+	for i in range(10):
+		await get_tree().physics_frame
+	var frame_body_matches: bool = local.get_frame_body() == target
+	var warning_on_target: bool = local.hud != null and local.hud.planet_threat_warning.visible
+
+	local.global_position = _body.global_position + Vector3(0, _body.radius + 1.0, 0)
+	local.velocity = Vector3.ZERO
+	local.reset_frame()
+	for i in range(10):
+		await get_tree().physics_frame
+	var warning_elsewhere: bool = local.hud != null and local.hud.planet_threat_warning.visible
+
+	# Resolve the shell now rather than waiting out a real 200m flight.
+	if is_instance_valid(shell):
+		shell.queue_free()
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	var threatened_after_resolve: bool = target.is_under_threat()
+	var siren_after_resolve: float = mat.get_shader_parameter("siren_strength")
+
+	_log("THREAT  shell launched: is_under_threat=%s siren_strength=%.1f | local player on target: frame_body matches=%s HUD warning=%s (same player elsewhere=%s) | shell resolved: is_under_threat=%s siren_strength=%.1f" % [
+		threatened_after_launch, siren_after_launch, frame_body_matches, warning_on_target, warning_elsewhere, threatened_after_resolve, siren_after_resolve])
+
+	local.queue_free()
 
 ## IMPROVEMENT - everyone can see what gun everyone else is holding.
 func _test_third_person_weapon() -> void:

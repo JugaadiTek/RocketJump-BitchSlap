@@ -101,6 +101,51 @@ MELEEANIM local attacker: hidden at rest=true -> visible+moved during windup=tru
 ```
 [tests/WeaponProbe.gd](../tests/WeaponProbe.gd)
 
+### Improvement: "Planet Destruction Imminent" - Planet Buster target warning
+A guided shell now flags its locked target as under threat for the whole
+flight (not just while a player holds the lock, which is transient and can
+flicker on and off as someone merely scans across a planet) - counted rather
+than a plain bool (`OrbitalBody.add_threat`/`remove_threat`) so a second
+overlapping shell can't have the first one's resolution clear the warning
+while it's still inbound. One state flip drives four things:
+- **Siren-flash shader.** [planet_surface.gdshader](../scenes/world/planet_surface.gdshader)
+  gets a `siren_strength` uniform; when set, a bright band sweeps around the
+  body's own vertical axis over `TIME` (a lighthouse-style rotating beacon)
+  layered with a faster overall pulse. Purely GPU-side once toggled - no
+  per-frame uniform pushes needed, unlike the hue-shift it sits alongside.
+- **Siren wail.** Every sound in this project is synthesised, one-shot only
+  (see `Sfx.gd`'s own docstring) - rather than add new looping-stream
+  machinery, added a `_siren()` synth (a sine swept by a slow LFO through one
+  full rise-and-fall per clip, unlike `_sweep()`'s one-directional glide,
+  which just reads as a charging weapon) and have the threatened
+  `OrbitalBody` re-trigger it on a repeating ~1.55s `Timer` for as long as
+  it's under threat.
+- **HUD banner.** New `PlanetThreatWarning` label in
+  [HUD.tscn](../scenes/ui/HUD.tscn), pulsed in `HUD.gd`. Shown only while
+  `Player.get_frame_body()` - the planet this specific player is actually
+  standing on right now - `is_under_threat()`; leaving the surface (or the
+  threat resolving) clears it, so it's never shown to players who aren't
+  actually in danger.
+- **Bots flee.** `Bot._think()` now checks its own `get_frame_body()` for
+  threat on every retarget tick and, if threatened, drops whatever it's
+  doing (mid-fight or not) into a new `FLEE` state: switches to the Space
+  Board and flies straight out along the surface normal, the same tool a
+  human would reach for. Naturally clears back to WANDER/ENGAGE once the bot
+  has cleared the body or the threat itself resolves - no separate cleanup
+  needed.
+[scripts/world/OrbitalBody.gd](../scripts/world/OrbitalBody.gd),
+[scripts/weapons/PlanetBusterProjectile.gd](../scripts/weapons/PlanetBusterProjectile.gd),
+[scripts/autoload/Sfx.gd](../scripts/autoload/Sfx.gd),
+[scripts/ui/HUD.gd](../scripts/ui/HUD.gd), [scripts/player/Player.gd](../scripts/player/Player.gd),
+[scripts/ai/Bot.gd](../scripts/ai/Bot.gd)
+
+Verified with new tests in both `WeaponProbe` and `AIProbe`:
+```
+THREAT  shell launched: is_under_threat=true siren_strength=1.0 | local player on target: frame_body matches=true HUD warning=true (same player elsewhere=false) | shell resolved: is_under_threat=false siren_strength=0.0
+AI-FLEE bot on threatened Cinder: state after retarget=2 (FLEE=2) weapon=4 (WEAPON_BOARD=4) | altitude -0.1m -> 39.0m (climbed=true)
+```
+[tests/WeaponProbe.gd](../tests/WeaponProbe.gd), [tests/AIProbe.gd](../tests/AIProbe.gd)
+
 ---
 
 ## 2026-08-13 — Session 16: multiplayer join fix attempted - real bug fixed, but NOT the one blocking connections

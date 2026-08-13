@@ -25,6 +25,14 @@ uniform vec2 uv_scale = vec2(4.0, 4.0);
 // the edge line.
 uniform float hue_shift_degrees : hint_range(0.0, 180.0) = 45.0;
 
+// Planet Buster inbound warning (see OrbitalBody.add_threat/remove_threat).
+// A single float flip from GDScript - all the actual motion is TIME-driven
+// in-shader, so a body under threat costs nothing extra per frame on the CPU
+// side, it just started paying for it on the GPU.
+uniform float siren_strength : hint_range(0.0, 1.0) = 0.0;
+uniform vec4 siren_color : source_color = vec4(1.0, 0.14, 0.05, 1.0);
+uniform float siren_speed : hint_range(0.1, 10.0) = 2.0;
+
 vec3 rgb2hsv(vec3 c) {
 	vec4 k = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
 	vec4 p = mix(vec4(c.bg, k.wz), vec4(c.gb, k.xy), step(c.b, c.g));
@@ -52,4 +60,19 @@ void fragment() {
 	METALLIC = metallic;
 	NORMAL_MAP = packed_tex.rgb;
 	NORMAL_MAP_DEPTH = normal_scale;
+
+	if (siren_strength > 0.0001) {
+		// A bright band rakes around the sphere's own vertical axis over time,
+		// like a lighthouse/siren beam sweeping the surface, layered with a
+		// faster overall pulse so the alarm still reads even from far away
+		// where the sweep band alone would be too thin to notice.
+		vec3 n = normalize(NORMAL);
+		float azimuth = atan(n.z, n.x) / 6.28318530718; // -0.5..0.5
+		float sweep = fract(azimuth + TIME * siren_speed * 0.2);
+		float band = smoothstep(0.05, 0.0, abs(sweep - 0.5));
+		float pulse = 0.5 + 0.5 * sin(TIME * siren_speed * 6.0);
+		float flash = clamp(band * 1.4 + pulse * 0.4, 0.0, 1.0) * siren_strength;
+		ALBEDO = mix(ALBEDO, siren_color.rgb, flash);
+		EMISSION = siren_color.rgb * flash * 2.2;
+	}
 }

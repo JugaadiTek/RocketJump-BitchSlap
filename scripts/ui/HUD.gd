@@ -15,11 +15,13 @@ extends CanvasLayer
 @onready var spawn_timer_label: Label = $Root/SpawnAimPanel/TimerLabel
 @onready var lock_indicator: Control = $Root/LockIndicator
 @onready var scope_overlay: ColorRect = $Root/ScopeOverlay
+@onready var planet_threat_warning: Label = $Root/PlanetThreatWarning
 
 
 var _my_player_id: int = -1
 var _frame_count: int = 0
 var _fps_timer: float = 0.0
+var _threat_pulse_time: float = 0.0
 
 func set_player_id(pid: int) -> void:
 	_my_player_id = pid
@@ -32,6 +34,13 @@ func _process(delta: float) -> void:
 		fps_label.text = "FPS: %d" % _frame_count
 		_frame_count = 0
 		_fps_timer = 0.0
+
+	if planet_threat_warning.visible:
+		# A fast alarm-red pulse rather than a static banner - the label
+		# sitting still would read as any other UI panel, not a siren.
+		_threat_pulse_time += delta
+		var t: float = 0.55 + 0.45 * sin(_threat_pulse_time * 9.0)
+		planet_threat_warning.modulate.a = t
 
 ## Full-screen railgun optic: transparent inside the lens, blurred and darkened
 ## outside it (see scenes/ui/scope.gdshader).
@@ -141,3 +150,12 @@ func update_lock_indicator(candidate: OrbitalBody, locked: OrbitalBody, lock_pro
 
 func hide_spawn_aim() -> void:
 	spawn_aim_panel.visible = false
+
+## Called from Player each frame - shows the "PLANET DESTRUCTION IMMINENT"
+## banner while this player's own current planet (Player.get_frame_body())
+## has an inbound Planet Buster shell locked on (OrbitalBody.is_under_threat).
+func update_planet_threat_warning(active: bool) -> void:
+	if active == planet_threat_warning.visible:
+		return
+	planet_threat_warning.visible = active
+	_threat_pulse_time = 0.0

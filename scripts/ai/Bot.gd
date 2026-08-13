@@ -1,7 +1,7 @@
 class_name Bot
 extends Player
 
-enum AiState { WANDER, ENGAGE }
+enum AiState { WANDER, ENGAGE, FLEE }
 
 ## Loadout slots, matching the order WeaponManager._ready() adds them.
 const WEAPON_ROCKET := 0
@@ -96,19 +96,49 @@ func _think(delta: float) -> void:
 	if _retarget_timer <= 0.0:
 		_retarget_timer = retarget_interval
 		_target = _find_enemy()
-		_state = AiState.ENGAGE if _target != null else AiState.WANDER
+		var here: OrbitalBody = get_frame_body()
+		if here != null and is_instance_valid(here) and here.is_under_threat():
+			# Survival beats a fight in progress - a bot mid-ENGAGE on a planet
+			# that's about to come apart drops its target and runs instead.
+			_state = AiState.FLEE
+		else:
+			_state = AiState.ENGAGE if _target != null else AiState.WANDER
 
 	_ai_wants_fire = false
 	_ai_wants_melee = false
 	_ai_wants_jump = false
 	_ai_weapon_index = -1
 
-	if _state == AiState.ENGAGE and is_instance_valid(_target) and not _target.is_dead:
-		_do_engage(delta)
-	else:
-		_do_wander(delta)
+	match _state:
+		AiState.FLEE:
+			_do_flee(delta)
+		AiState.ENGAGE:
+			if is_instance_valid(_target) and not _target.is_dead:
+				_do_engage(delta)
+			else:
+				_do_wander(delta)
+		_:
+			_do_wander(delta)
 
 	_update_fire_pulse(delta)
+
+## A Planet Buster shell has this bot's current planet locked - get off it.
+## Reaches for the Space Board (free 6-axis flight, see SpaceBoard.gd) and
+## flies straight along the surface normal rather than trying to out-walk a
+## planet-sized explosion. _retarget_timer re-checks is_under_threat() every
+## retarget_interval, so this naturally clears back to WANDER/ENGAGE once
+## either the bot has cleared the body or the threat itself resolves.
+func _do_flee(_delta: float) -> void:
+	var body: OrbitalBody = get_frame_body()
+	if body == null or not is_instance_valid(body):
+		# Already off the surface - keep flying straight until the next
+		# think() re-evaluates.
+		_ai_desired_dir = get_look_direction()
+	else:
+		_ai_desired_dir = (global_position - body.global_position).normalized()
+	_ai_move_axis = Vector2(0.0, 1.0)
+	_ai_weapon_index = WEAPON_BOARD
+	_ai_wants_jump = true
 
 func _do_engage(_delta: float) -> void:
 	var eye: Vector3 = camera.global_position

@@ -50,6 +50,12 @@ const PLANET_SURFACE_SHADER: Shader = preload("res://scenes/world/planet_surface
 @export var fragment_count_max: int = 4
 
 var is_shattered: bool = false
+## How many inbound Planet Buster shells currently have this body locked
+## (see PlanetBusterProjectile.launch/_exit_tree). Counted rather than a
+## plain bool so a second overlapping shot can't have the first one's
+## resolution turn the siren off while it's still inbound.
+var _threat_count: int = 0
+var _siren_timer: Timer = null
 ## Rigid motion of this body between the previous physics frame and the current
 ## one, expressed as a transform that maps a point's old world position to its
 ## new one. Planets here orbit at up to ~12 m/s - faster than a player can run -
@@ -516,6 +522,54 @@ func _physics_process(delta: float) -> void:
 func note_structure(height: float) -> void:
 	structure_reach = maxf(structure_reach, height)
 
+func is_under_threat() -> bool:
+	return _threat_count > 0
+
+## Called once per inbound Planet Buster shell for the whole time it's
+## guided at this body (see PlanetBusterProjectile.launch). Drives the
+## siren-flash surface shader, a repeating siren wail, and - via Bot._think -
+## tells any bot standing here to flee.
+func add_threat() -> void:
+	_threat_count += 1
+	if _threat_count == 1:
+		_set_siren_shader(true)
+		_start_siren_audio()
+
+## Mirror of add_threat(), called exactly once per shell regardless of how it
+## resolved (hit, miss, or expired - see PlanetBusterProjectile._exit_tree).
+func remove_threat() -> void:
+	_threat_count = maxi(_threat_count - 1, 0)
+	if _threat_count == 0:
+		_set_siren_shader(false)
+		_stop_siren_audio()
+
+func _set_siren_shader(active: bool) -> void:
+	var mat: Material = mesh.get_surface_override_material(0)
+	if mat is ShaderMaterial:
+		(mat as ShaderMaterial).set_shader_parameter("siren_strength", 1.0 if active else 0.0)
+
+## Re-triggers a one-shot "siren_wail" (see Sfx._synthesize) on a fixed
+## cadence rather than looping a stream - matches every other sound in this
+## project, which is one-shot only (see Sfx.gd's own docstring), so this
+## needed no new playback machinery, just a Timer already parented under an
+## OrbitalBody that already owns other Sfx.play_3d calls (shatter).
+func _start_siren_audio() -> void:
+	Sfx.play_3d("siren_wail", global_position, 1.0, -2.0, 0.02)
+	if _siren_timer == null:
+		_siren_timer = Timer.new()
+		_siren_timer.wait_time = 1.55
+		_siren_timer.timeout.connect(_on_siren_timer_timeout)
+		add_child(_siren_timer)
+	_siren_timer.start()
+
+func _on_siren_timer_timeout() -> void:
+	if is_under_threat():
+		Sfx.play_3d("siren_wail", global_position, 1.0, -2.0, 0.02)
+
+func _stop_siren_audio() -> void:
+	if _siren_timer:
+		_siren_timer.stop()
+
 func _update_motion_delta(delta: float) -> void:
 	motion_delta = global_transform * _prev_global_transform.affine_inverse()
 	motion_delta.basis = motion_delta.basis.orthonormalized()
@@ -655,6 +709,11 @@ func shatter(blast_radius: float, blast_damage: float, instigator: Node = null, 
 	if is_shattered:
 		return
 	is_shattered = true
+	# The shell that caused this is about to remove_threat() itself on its own
+	# _exit_tree(), but the siren/warning has no reason to survive the body it
+	# was warning about even a frame longer than that.
+	_threat_count = 0
+	_stop_siren_audio()
 	# Scaled by size: a moon cracks, a 44m world detonates. volume_db trimmed
 	# from the original +10 - a boost that hot on top of an already
 	# near-full-scale synthesised waveform clipped hard at output; +3 is still
