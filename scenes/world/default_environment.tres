@@ -1,6 +1,6 @@
-[gd_resource type="Environment" load_steps=4 format=3]
+[gd_resource type="Environment" format=3 uid="uid://q35xf4kefsww"]
 
-[ext_resource type="Shader" path="res://scenes/world/space_sky.gdshader" id="1"]
+[ext_resource type="Shader" uid="uid://dlrqf672w8juf" path="res://scenes/world/space_sky.gdshader" id="1"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_1"]
 shader = ExtResource("1")
@@ -26,7 +26,6 @@ tonemap_mode = 3
 tonemap_exposure = 1.15
 tonemap_white = 6.0
 ssao_enabled = true
-ssao_intensity = 2.0
 ssao_power = 1.8
 glow_enabled = true
 glow_intensity = 1.15

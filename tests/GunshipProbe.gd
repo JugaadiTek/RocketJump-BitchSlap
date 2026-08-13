@@ -185,16 +185,23 @@ func _test_mount_and_artillery() -> void:
 	var player_sees_itself_mounted: bool = driver.mounted_gunship == ship
 
 	# Aim the driver at a live planet and hold fire - should paint 3 markers,
-	# then (after paint_to_launch_delay) launch shells at them.
+	# then (after paint_to_launch_delay) launch shells at them. Re-aims every
+	# frame rather than once - the seat doesn't carry the driver along with
+	# the hull's own autopilot drift (a documented, deliberate limitation, see
+	# Gunship.gd's own class doc), so a single stale aim_at() call can drift
+	# off the target over a few frames exactly the way it never would for a
+	# real player continuously correcting with the mouse.
 	var target_body: OrbitalBody = _arena.get_node("OrbitalBodies/Cinder")
 	driver.aim_at(target_body.global_position)
 	for i in range(3):
 		await get_tree().physics_frame
+		driver.aim_at(target_body.global_position)
 	var start_orbit_radius: float = target_body.orbit_radius
 	var start_speed: float = target_body.orbit_speed
 	driver.probe_fire = true
 	for i in range(5):
 		await get_tree().physics_frame
+		driver.aim_at(target_body.global_position)
 	driver.probe_fire = false
 	var markers_painted: int = target_body.get_children().filter(func(c): return c is ArtilleryMarker).size()
 	var cooldown_engaged: bool = not ship.can_fire_artillery()

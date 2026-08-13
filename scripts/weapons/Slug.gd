@@ -67,6 +67,16 @@ var _retarget_timer: float = 0.0
 var _climb_body: StaticBody3D = null
 var _climb_start_pos: Vector3 = Vector3.ZERO
 var _climb_host_body: OrbitalBody = null
+## Radial "up" direction captured once at the moment it grabbed the wall, not
+## re-derived from the current (already-on-the-wall) position every frame -
+## re-deriving it that way fed back into itself just enough (each frame's tiny
+## position nudge very slightly changing the "radial" reference for the next)
+## to occasionally wander off true vertical over a couple of seconds instead
+## of holding a stable climb line. Still re-projected onto the CURRENT
+## surface_normal's tangent plane every frame (see _steer_climbing), so it
+## still bends correctly with the wall's own curvature-compensated tilt as
+## height increases - only the underlying reference direction itself is fixed.
+var _climb_up_ref: Vector3 = Vector3.UP
 
 func _ready() -> void:
 	super._ready()
@@ -233,6 +243,43 @@ func _steer_toward_target(delta: float) -> Vector3:
 	var angle: float = current_dir.angle_to(desired_dir)
 	return desired_dir if (angle <= max_turn or angle < 0.0001) else current_dir.slerp(desired_dir, max_turn / angle)
 
+## CLIMBING's own steering, separate from SLITHERING's _steer_toward_target():
+## a wall panel is flat and BOUNDED (a window/doorway cutout or the panel's
+## own edge can be a meter away in any lateral direction), unlike a planet's
+## continuous sphere - chasing the target's raw direction the way SLITHERING
+## does walks a climbing slug off the edge of the panel almost immediately.
+## Climbs mostly straight up the wall instead (matches how a real panel is
+## shaped: much taller than any one piece is wide), with just enough lateral
+## pull toward the target to end up above them rather than climbing blind.
+func _steer_climbing(delta: float) -> Vector3:
+	var up_tangent: Vector3 = _climb_up_ref - _surface_normal * _climb_up_ref.dot(_surface_normal)
+	up_tangent = up_tangent.normalized() if up_tangent.length_squared() > 0.0001 else Vector3.RIGHT
+
+	var target_tangent: Vector3 = Vector3.ZERO
+	if _target:
+		var to_target: Vector3 = _target.global_position - global_position
+		var raw: Vector3 = to_target - _surface_normal * to_target.dot(_surface_normal)
+		if raw.length_squared() > 0.0001:
+			target_tangent = raw.normalized()
+
+	# A real wall panel is only a few meters wide - even a modest constant
+	# lateral pull toward the target, sustained over a few seconds of
+	# climbing, walks the slug straight off the side edge into open air (no
+	# probe hit there at all) well before it reaches anything worth climbing
+	# for. A restoring pull back toward the vertical line it first grabbed
+	# the wall on keeps the target-homing purely a light nudge instead.
+	var side_axis: Vector3 = _surface_normal.cross(up_tangent).normalized()
+	var side_drift: float = (global_position - _climb_start_pos).dot(side_axis)
+	var side_restore: float = -clampf(side_drift / 2.5, -1.0, 1.0)
+
+	var desired_dir: Vector3 = (up_tangent * 0.82 + target_tangent * 0.12 + side_axis * side_restore * 0.3)
+	desired_dir = desired_dir.normalized() if desired_dir.length_squared() > 0.0001 else up_tangent
+
+	var current_dir: Vector3 = velocity.normalized() if velocity.length() > 0.01 else desired_dir
+	var max_turn: float = deg_to_rad(turn_rate_degrees) * delta
+	var angle: float = current_dir.angle_to(desired_dir)
+	return desired_dir if (angle <= max_turn or angle < 0.0001) else current_dir.slerp(desired_dir, max_turn / angle)
+
 ## Short ray in direction `dir` looking for a wall to climb - a StaticBody3D
 ## that isn't the planet we're already standing on. Empty dict if nothing's
 ## there (or it's just more of the same planet surface).
@@ -255,6 +302,7 @@ func _start_climbing(body: StaticBody3D, hit_pos: Vector3, hit_normal: Vector3) 
 	_climb_body = body
 	_climb_start_pos = hit_pos
 	_climb_host_body = GravityManager.get_nearest_body(hit_pos)
+	_climb_up_ref = (hit_pos - _climb_host_body.global_position).normalized() if is_instance_valid(_climb_host_body) else Vector3.UP
 	_surface_normal = hit_normal.normalized() if hit_normal.length() > 0.1 else -velocity.normalized()
 	up_direction = _surface_normal
 	velocity = Vector3.ZERO
@@ -269,7 +317,7 @@ func _process_climbing(delta: float) -> void:
 		return
 
 	_update_target(delta)
-	var new_dir: Vector3 = _steer_toward_target(delta)
+	var new_dir: Vector3 = _steer_climbing(delta)
 
 	velocity = new_dir * slither_speed
 	var motion: Vector3 = velocity * delta
@@ -286,14 +334,8 @@ func _process_climbing(delta: float) -> void:
 	# entirely (climbed over the top, or past a corner too sharp to follow)
 	# drops it back to FLYING so gravity takes back over instead of leaving it
 	# stuck floating at the last surface point.
-	var space_state := get_world_3d().direct_space_state
-	var probe_from: Vector3 = global_position + _surface_normal * 0.6
-	var probe_to: Vector3 = global_position - _surface_normal * 0.6
-	var query := PhysicsRayQueryParameters3D.create(probe_from, probe_to)
-	query.collision_mask = 1
-	query.exclude = [self]
-	var result: Dictionary = space_state.intersect_ray(query)
-	if result.is_empty() or result.collider != _climb_body:
+	var result: Dictionary = _probe_climb_surface()
+	if result.is_empty():
 		_give_up_climbing()
 		return
 	_surface_normal = result.normal.normalized() if result.normal.length() > 0.1 else _surface_normal
@@ -315,6 +357,34 @@ func _process_climbing(delta: float) -> void:
 	if new_dir.length_squared() > 0.0001:
 		look_at(global_position + new_dir, _surface_normal)
 
+## Looks for the wall straight ahead along the last known surface normal,
+## same as SLITHERING's own re-snap - but tries a small cross-pattern of
+## points around the current position (not just the exact center), not just
+## once: a wall built from several curvature-compensated segments
+## (Building._segments_for) can have a hairline seam between adjacent pieces,
+## and a single ray landing exactly on one is enough to miss both. Returns
+## the first hit against `_climb_body`, or {} if the wall's genuinely gone
+## (an edge, a corner, or the open observation deck above the top floor).
+func _probe_climb_surface() -> Dictionary:
+	var space_state := get_world_3d().direct_space_state
+	var side_axis: Vector3 = _surface_normal.cross(global_transform.basis.y)
+	if side_axis.length_squared() < 0.0001:
+		side_axis = _surface_normal.cross(Vector3.RIGHT)
+	side_axis = side_axis.normalized() if side_axis.length_squared() > 0.0001 else Vector3.RIGHT
+	var up_axis: Vector3 = _surface_normal.cross(side_axis).normalized()
+	var offsets: Array[Vector3] = [
+		Vector3.ZERO, side_axis * 0.25, -side_axis * 0.25, up_axis * 0.25, -up_axis * 0.25,
+	]
+	for offset in offsets:
+		var center: Vector3 = global_position + offset
+		var query := PhysicsRayQueryParameters3D.create(center + _surface_normal * 0.9, center - _surface_normal * 0.9)
+		query.collision_mask = 1
+		query.exclude = [self]
+		var result: Dictionary = space_state.intersect_ray(query)
+		if not result.is_empty() and result.collider == _climb_body:
+			return result
+	return {}
+
 ## Drops off the wall back into FLYING, carrying current tangential speed, so
 ## gravity/the planet below take back over instead of the slug getting stuck.
 func _give_up_climbing() -> void:
@@ -326,7 +396,12 @@ func _find_target() -> Node3D:
 	var best: Node3D = null
 	var best_dist: float = tracking_range
 	for node in get_tree().get_nodes_in_group("damageable"):
-		if node == owner_player or not is_instance_valid(node):
+		# Slug itself is in "damageable" too (so other weapons can shoot it
+		# down mid-flight - see apply_damage above); excluding only
+		# owner_player left a slug with no owner_player set (bypassed launch(),
+		# as WeaponProbe's SLUGTOWER test does) free to "target" itself at
+		# distance 0, every single check.
+		if node == owner_player or node == self or not is_instance_valid(node):
 			continue
 		if "is_dead" in node and node.is_dead:
 			continue

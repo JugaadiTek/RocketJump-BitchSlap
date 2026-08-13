@@ -981,7 +981,7 @@ func _setup_bounty_visuals() -> void:
 	_nametag.no_depth_test = true
 	_nametag.fixed_size = true
 	_nametag.pixel_size = 0.01
-	_nametag.font_size = 44
+	_nametag.font_size = 0
 	_nametag.outline_size = 10
 	_nametag.position = Vector3(0.0, 2.3, 0.0)
 	_nametag.visible = false

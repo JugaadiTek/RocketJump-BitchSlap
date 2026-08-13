@@ -748,9 +748,14 @@ func _test_slug_vs_tower() -> void:
 	for i in range(120):
 		await get_tree().physics_frame
 	var alive: bool = is_instance_valid(slug)
-	var state_after: String = "freed" if not alive else ("SLITHERING" if slug._state == Slug.State.SLITHERING else "FLYING")
+	var state_after: String = "freed"
+	if alive:
+		match slug._state:
+			Slug.State.SLITHERING: state_after = "SLITHERING"
+			Slug.State.CLIMBING: state_after = "CLIMBING"
+			_: state_after = "FLYING"
 	var residual_speed: float = slug.velocity.length() if alive else -1.0
-	_log("SLUGTOWER slug fired straight at a tower wall: state after 2s = %s, still-alive=%s, residual speed=%.2f (FLYING+alive+near-zero speed means stuck against the wall, not landed/expired)" % [
+	_log("SLUGTOWER slug fired straight at a tower wall: state after 2s = %s, still-alive=%s, residual speed=%.2f (CLIMBING means it's scaling the wall as designed; FLYING+alive+near-zero speed means stuck against the wall instead, not landed/expired/climbing)" % [
 		state_after, alive, residual_speed])
 	if alive:
 		slug.queue_free()
