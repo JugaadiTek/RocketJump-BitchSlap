@@ -68,6 +68,26 @@ placeholder_text = "7777"
 layout_mode = 2
 text = "Start with all weapons (testing)"
 
+[node name="AimAssistCheck" type="CheckBox" parent="CenterContainer/VBoxContainer" unique_id=902238842]
+layout_mode = 2
+button_pressed = true
+text = "Aim assist"
+
+[node name="AimAssistRow" type="HBoxContainer" parent="CenterContainer/VBoxContainer" unique_id=672939937]
+layout_mode = 2
+
+[node name="AimAssistLabel" type="Label" parent="CenterContainer/VBoxContainer/AimAssistRow" unique_id=531004663]
+layout_mode = 2
+text = "Strength"
+
+[node name="AimAssistSlider" type="HSlider" parent="CenterContainer/VBoxContainer/AimAssistRow" unique_id=1517177907]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.0
+max_value = 1.0
+step = 0.05
+value = 0.5
+
 [node name="StatusLabel" type="Label" parent="CenterContainer/VBoxContainer" unique_id=902238840]
 layout_mode = 2
 horizontal_alignment = 1

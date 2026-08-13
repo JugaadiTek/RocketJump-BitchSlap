@@ -15,10 +15,13 @@ extends CanvasLayer
 @onready var spawn_timer_label: Label = $Root/SpawnAimPanel/TimerLabel
 @onready var lock_indicator: Control = $Root/LockIndicator
 @onready var scope_overlay: ColorRect = $Root/ScopeOverlay
+@onready var bramble_overlay: ColorRect = $Root/BrambleOverlay
 @onready var planet_threat_warning: Label = $Root/PlanetThreatWarning
 @onready var gunship_health_panel: Control = $Root/GunshipHealthPanel
 @onready var gunship_health_bar: ProgressBar = $Root/GunshipHealthPanel/HealthBar
 @onready var gunship_name_label: Label = $Root/GunshipHealthPanel/NameLabel
+@onready var bounty_panel: PanelContainer = $Root/BountyPanel
+@onready var bounty_list: VBoxContainer = $Root/BountyPanel/BountyVBox/BountyList
 
 
 var _my_player_id: int = -1
@@ -50,6 +53,13 @@ func _process(delta: float) -> void:
 func update_scope(active: bool) -> void:
 	if scope_overlay:
 		scope_overlay.visible = active
+
+## Full-screen green-brown tint while the local player is standing in a
+## BramblePatch - same "screen-space overlay reacting to local state only"
+## idiom as update_scope's railgun lens.
+func update_bramble_vision(active: bool) -> void:
+	if bramble_overlay:
+		bramble_overlay.visible = active
 
 func update_charge_bar(charge: float, visible_flag: bool) -> void:
 	charge_panel.visible = visible_flag
@@ -102,6 +112,40 @@ func update_scoreboard(is_open: bool, entries: Array[Dictionary]) -> void:
 	# Scroll so the current player is always visible in the centre of the list
 	await get_tree().process_frame
 	score_scroll.scroll_vertical = int(max(0.0, my_row_y - score_scroll.size.y * 0.4))
+
+## Left-side panel of every active bounty, highest value first - same
+## rebuild-only-on-size-change idiom as update_scoreboard/update_weapons.
+## `entries` is BountyManager.get_sorted_bounties(): [{player_id, name, value}].
+func update_bounty_panel(entries: Array[Dictionary]) -> void:
+	bounty_panel.visible = not entries.is_empty()
+	if entries.is_empty():
+		return
+
+	if bounty_list.get_child_count() != entries.size():
+		for c in bounty_list.get_children():
+			bounty_list.remove_child(c)
+			c.queue_free()
+		for _i in range(entries.size()):
+			var row := HBoxContainer.new()
+			var name_lbl := Label.new()
+			name_lbl.name = "Name"
+			name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			name_lbl.add_theme_font_size_override("font_size", 16)
+			row.add_child(name_lbl)
+			var value_lbl := Label.new()
+			value_lbl.name = "Value"
+			value_lbl.custom_minimum_size = Vector2(36, 0)
+			value_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+			value_lbl.add_theme_font_size_override("font_size", 16)
+			value_lbl.modulate = Color(1.0, 0.82, 0.2, 1)
+			row.add_child(value_lbl)
+			bounty_list.add_child(row)
+
+	for i in range(entries.size()):
+		var row: HBoxContainer = bounty_list.get_child(i)
+		var entry: Dictionary = entries[i]
+		(row.get_node("Name") as Label).text = str(entry["name"])
+		(row.get_node("Value") as Label).text = str(entry["value"])
 
 func update_health(current: float, max_health: float) -> void:
 	health_bar.max_value = max_health

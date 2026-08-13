@@ -1,0 +1,40 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/weapons/PlanetBusterPickup.gd" id="1"]
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_1"]
+radius = 1.2
+height = 2.0
+
+[sub_resource type="SphereMesh" id="SphereMesh_1"]
+radius = 0.45
+height = 0.9
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_1"]
+albedo_color = Color(0.5, 0.15, 0.75, 1)
+emission_enabled = true
+emission = Color(0.65, 0.2, 1, 1)
+emission_energy_multiplier = 3.5
+
+[node name="BlackHoleGunPickup" type="Area3D"]
+collision_layer = 32
+collision_mask = 2
+script = ExtResource("1")
+weapon_id = "blackholegun"
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 1, 0)
+shape = SubResource("CylinderShape3D_1")
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+mesh = SubResource("SphereMesh_1")
+surface_material_override/0 = SubResource("StandardMaterial3D_1")
+
+[node name="OmniLight3D" type="OmniLight3D" parent="Visual"]
+position = Vector3(0, 1, 0)
+light_color = Color(0.65, 0.2, 1, 1)
+light_energy = 2.0
+omni_range = 5.0

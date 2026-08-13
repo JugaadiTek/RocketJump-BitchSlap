@@ -1,0 +1,28 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/weapons/BlackHoleGun.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/weapons/BlackHoleProjectile.tscn" id="2"]
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_barrel"]
+top_radius = 0.05
+bottom_radius = 0.09
+height = 0.42
+radial_segments = 12
+
+[sub_resource type="SphereMesh" id="SphereMesh_orb"]
+radius = 0.09
+height = 0.18
+
+[node name="BlackHoleGun" type="Node3D"]
+script = ExtResource("1")
+projectile_scene = ExtResource("2")
+
+[node name="ViewModel" type="Node3D" parent="."]
+
+[node name="Barrel" type="MeshInstance3D" parent="ViewModel"]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, -0.06, -0.34)
+mesh = SubResource("CylinderMesh_barrel")
+
+[node name="Orb" type="MeshInstance3D" parent="ViewModel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.02, -0.1)
+mesh = SubResource("SphereMesh_orb")

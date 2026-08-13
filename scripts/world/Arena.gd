@@ -113,6 +113,10 @@ const STRUCTURE_CLEARANCE_MARGIN: float = 2.0
 @export var bot_count: int = 31
 @export var planet_buster_pickup_scene: PackedScene
 @export var planet_buster_pad_bodies: Array[String] = ["Verdant", "Umbra"]
+@export var black_hole_gun_pickup_scene: PackedScene
+@export var black_hole_gun_pad_bodies: Array[String] = ["Halcyon"]
+@export var brambles_launcher_pickup_scene: PackedScene
+@export var brambles_launcher_pad_bodies: Array[String] = ["Cinder"]
 @export var jump_pad_scene: PackedScene
 @export var jump_pad_bodies: Array[String] = ["Alpha", "Beta", "Ferrum", "Cobalt"]
 @export var tower_scene: PackedScene
@@ -129,9 +133,12 @@ const STRUCTURE_CLEARANCE_MARGIN: float = 2.0
 var _bodies_by_name: Dictionary = {}
 
 func _ready() -> void:
+	BountyManager.start_match()
 	_build_orbital_bodies()
 	_build_spawn_points()
-	_build_planet_buster_pads()
+	_build_pickup_pads(planet_buster_pickup_scene, planet_buster_pad_bodies)
+	_build_pickup_pads(black_hole_gun_pickup_scene, black_hole_gun_pad_bodies)
+	_build_pickup_pads(brambles_launcher_pickup_scene, brambles_launcher_pad_bodies)
 	_build_jump_pads()
 	_build_buildings()
 	_build_health_packs()
@@ -204,14 +211,18 @@ func _build_spawn_points() -> void:
 			point.position = dir * (body.radius + 1.2)
 			MatchState.register_spawn_point(point)
 
-func _build_planet_buster_pads() -> void:
-	if planet_buster_pickup_scene == null:
+## Generic weapon-pickup-pad placement, shared by every pickup-only weapon
+## (Planet Buster, Black Hole Gun, Brambles Launcher) - each pad scene already
+## knows which weapon it grants (see PlanetBusterPickup.gd's weapon_id), so
+## this only ever needs a scene + which bodies to place it on.
+func _build_pickup_pads(scene: PackedScene, bodies: Array[String]) -> void:
+	if scene == null:
 		return
-	for body_name in planet_buster_pad_bodies:
+	for body_name in bodies:
 		var body: OrbitalBody = _bodies_by_name.get(body_name)
 		if body == null:
 			continue
-		var pad := planet_buster_pickup_scene.instantiate()
+		var pad := scene.instantiate()
 		body.add_child(pad)
 		var dir := Vector3(randf_range(-1, 1), randf_range(0.3, 1), randf_range(-1, 1)).normalized()
 		pad.position = dir * (body.radius + 0.5)

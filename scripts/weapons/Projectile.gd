@@ -30,6 +30,10 @@ func _ready() -> void:
 	collision_mask |= 1 # world / planets
 	collision_mask |= 2 # players
 	collision_mask |= 8 # npcs
+	# Lets anything that needs to find "every projectile in flight" (the
+	# Black Hole Gun's pull) do so without every weapon having to register
+	# itself separately.
+	add_to_group("projectiles")
 
 func launch(initial_velocity: Vector3, shooter: Node) -> void:
 	# Add the shooter's current velocity so the projectile doesn't appear to

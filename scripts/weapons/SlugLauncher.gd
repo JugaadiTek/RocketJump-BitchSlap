@@ -13,6 +13,7 @@ func _do_fire(muzzle_transform: Transform3D, aim_direction: Vector3) -> void:
 	if slug_scene == null:
 		push_warning("SlugLauncher has no slug_scene assigned")
 		return
+	aim_direction = _apply_aim_assist(muzzle_transform.origin, aim_direction)
 	var slug: Slug = slug_scene.instantiate()
 	_get_projectile_root().add_child(slug)
 	slug.global_position = muzzle_transform.origin

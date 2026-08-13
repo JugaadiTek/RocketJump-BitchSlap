@@ -71,6 +71,14 @@ var driver_id: int = -1
 
 var _velocity_dir: Vector3 = Vector3.FORWARD
 var _burst_cooldown_remaining: float = 0.0
+## The driver at the moment a burst was requested, captured in
+## _network_request_fire_artillery and threaded through to the shells in
+## _launch_burst - resolving it fresh there instead would credit whoever
+## happens to be in the seat a second later (paint_to_launch_delay), which
+## could be nobody if they'd already dismounted. Bounty tracking (War
+## Criminal) and kill credit both depend on this actually being the Player
+## who pulled the trigger, not the Gunship itself - see ArtilleryShell.launch().
+var _pending_shooter: Node = null
 ## Set the first time this ship ever gets a driver, and never cleared - what
 ## distinguishes "abandoned" (had a crew, now doesn't) from "hasn't been
 ## boarded yet", which stays in its normal meander/stay-in-bounds mode
@@ -362,6 +370,9 @@ func _network_request_fire_artillery(requester_id: int, aim_from: Vector3, aim_d
 	if not is_instance_valid(body) or body.is_shattered:
 		return
 	_burst_cooldown_remaining = burst_cooldown
+	_pending_shooter = _find_player_node(requester_id)
+	if _pending_shooter:
+		BountyManager.report_gunship_strike(requester_id)
 	var hit_pos: Vector3 = result.position
 	var normal: Vector3 = result.normal
 	var ref: Vector3 = Vector3.RIGHT if absf(normal.dot(Vector3.RIGHT)) < 0.9 else Vector3.FORWARD
@@ -374,7 +385,7 @@ func _network_request_fire_artillery(requester_id: int, aim_from: Vector3, aim_d
 		var spot_local: Vector3 = (spot_world - body.global_position).normalized() * body.radius
 		marker_paths.append(_spawn_marker(body, spot_local))
 	var t: SceneTreeTimer = get_tree().create_timer(paint_to_launch_delay)
-	t.timeout.connect(_launch_burst.bind(marker_paths))
+	t.timeout.connect(_launch_burst.bind(marker_paths, _pending_shooter))
 
 func _spawn_marker(body: OrbitalBody, local_pos: Vector3) -> NodePath:
 	if marker_scene == null:
@@ -389,9 +400,14 @@ func _spawn_marker(body: OrbitalBody, local_pos: Vector3) -> NodePath:
 	marker.transform.basis = Basis(bx, normal, bz)
 	return marker.get_path()
 
-func _launch_burst(marker_paths: Array[NodePath]) -> void:
+func _launch_burst(marker_paths: Array[NodePath], shooter: Node) -> void:
 	if artillery_scene == null or is_destroyed:
 		return
+	# Credit the driver who actually fired, not this ship - falls back to the
+	# ship itself (the old, uncredited behaviour) only if they're gone by now
+	# (disconnected between painting and launch; dismounting alone doesn't
+	# invalidate the node, just clears driver_id).
+	var credited_shooter: Node = shooter if is_instance_valid(shooter) else self
 	for path in marker_paths:
 		if path.is_empty():
 			continue
@@ -416,8 +432,16 @@ func _launch_burst(marker_paths: Array[NodePath]) -> void:
 		var to_target: Vector3 = (marker.global_position - shell.global_position)
 		var lean: Vector3 = to_target.normalized() if to_target.length() > 1.0 else up_launch
 		var launch_dir: Vector3 = (up_launch * 0.7 + lean * 0.3).normalized()
-		shell.launch(launch_dir * 90.0, self)
+		shell.launch(launch_dir * 90.0, credited_shooter)
 		Sfx.play_3d("buster_fire", muzzle_marker.global_position, 0.85, 2.0, 0.04)
+
+## Resolves a player_id to its Player node - same "players" group every other
+## by-id lookup in this project uses (see Railgun._highlight_other_players).
+func _find_player_node(id: int) -> Node:
+	for node in get_tree().get_nodes_in_group("players"):
+		if is_instance_valid(node) and "player_id" in node and node.player_id == id:
+			return node
+	return null
 
 ## Mirrors Weapon._get_projectile_root() exactly (lazily creates the shared
 ## container rather than assuming some other weapon has already fired and

@@ -1,4 +1,4 @@
-[gd_scene load_steps=25 format=3]
+[gd_scene load_steps=27 format=3]
 
 [ext_resource type="Script" path="res://scripts/player/Player.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/player/WeaponManager.gd" id="2"]
@@ -12,6 +12,8 @@
 [ext_resource type="PackedScene" path="res://scenes/weapons/GrapplingHook.tscn" id="10"]
 [ext_resource type="Script" path="res://scripts/player/HookVisual.gd" id="11"]
 [ext_resource type="Script" path="res://scripts/player/WeaponModel.gd" id="12"]
+[ext_resource type="PackedScene" path="res://scenes/weapons/BlackHoleGun.tscn" id="20"]
+[ext_resource type="PackedScene" path="res://scenes/weapons/BramblesLauncher.tscn" id="21"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_1"]
 radius = 0.4
@@ -121,6 +123,8 @@ slug_launcher_scene = ExtResource("6")
 planet_buster_scene = ExtResource("7")
 space_board_scene = ExtResource("9")
 grappling_hook_scene = ExtResource("10")
+black_hole_gun_scene = ExtResource("20")
+brambles_launcher_scene = ExtResource("21")
 
 [node name="MeleeViewModel" type="Node3D" parent="Head/Camera3D/WeaponManager"]
 visible = false

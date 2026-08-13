@@ -104,6 +104,11 @@ func _apply_splash(center: Vector3) -> void:
 			var away: Vector3 = (node.global_position - center)
 			var dir: Vector3 = away.normalized() if away.length() > 0.01 else -velocity.normalized()
 			var mult: float = self_knockback_multiplier if is_owner else 1.0
+			# Rocket-jumping off open space (not riding a planet's surface
+			# frame) shoves the player twice as hard as it should - halve the
+			# self-knockback specifically for shots fired/felt while in space.
+			if is_owner and node.has_method("get_frame_body") and node.get_frame_body() == null:
+				mult *= 0.5
 			var impulse: Vector3 = dir * knockback_strength * falloff * mult
 			if node.has_method("network_apply_impulse") and not node.is_multiplayer_authority():
 				node.rpc_id(node.get_multiplayer_authority(), "network_apply_impulse", impulse)

@@ -25,9 +25,19 @@ const PLANET_SURFACE_SHADER: Shader = preload("res://scenes/world/planet_surface
 ## with no orbit ring at all - _add_orbit_ring() only ran once, from _ready(),
 ## back when both were still unset. These setters make sure the ring gets
 ## created (or moved/resized) whenever either value changes post-ready.
+## Watches whatever it's currently set to for that body's own `shattered`
+## signal (only meaningful when the pivot is itself an OrbitalBody, i.e. a
+## moon orbiting a planet - not the top-level orbit_center Marker3D, which
+## never shatters) - see _on_orbit_pivot_shattered()/go_rogue(). Reconnects
+## automatically every time this changes, including the post-ready
+## reassignment fragments and recaptured rogue bodies both do.
 @export var orbit_pivot: Node3D:
 	set(v):
+		if orbit_pivot is OrbitalBody and orbit_pivot != v and orbit_pivot.shattered.is_connected(_on_orbit_pivot_shattered):
+			orbit_pivot.shattered.disconnect(_on_orbit_pivot_shattered)
 		orbit_pivot = v
+		if orbit_pivot is OrbitalBody and not orbit_pivot.shattered.is_connected(_on_orbit_pivot_shattered):
+			orbit_pivot.shattered.connect(_on_orbit_pivot_shattered)
 		_ensure_orbit_ring()
 @export var orbit_radius: float = 0.0:
 	set(v):
@@ -49,7 +59,24 @@ const PLANET_SURFACE_SHADER: Shader = preload("res://scenes/world/planet_surface
 @export var fragment_count_min: int = 2
 @export var fragment_count_max: int = 4
 
+@export_group("Rogue")
+## Multiplier on GravityManager's normal pull while rogue - real multi-body
+## gravity is what has to carry this body now that the analytic orbit formula
+## has stopped running for it, so this is tuned close to 1 (a rogue body
+## should fall roughly like anything else does), not the exaggerated pull
+## Slug.gd uses for its own in-flight arcs.
+@export var rogue_gravity_multiplier: float = 1.0
+## Seconds of sustained proximity to a candidate host before its pull toward
+## a matching stable orbit reaches full strength - see _update_rogue_capture().
+@export var rogue_capture_time: float = 4.0
+
 var is_shattered: bool = false
+## True from the moment this body's own orbit_pivot is destroyed until it
+## either gets recaptured into a new stable orbit or drifts past the arena
+## boundary and shatters itself. See go_rogue()/_process_rogue().
+var is_rogue: bool = false
+var _rogue_velocity: Vector3 = Vector3.ZERO
+var _rogue_capture_progress: float = 0.0
 ## How many inbound Planet Buster shells currently have this body locked
 ## (see PlanetBusterProjectile.launch/_exit_tree). Counted rather than a
 ## plain bool so a second overlapping shot can't have the first one's
@@ -487,7 +514,9 @@ func _physics_process(delta: float) -> void:
 		motion_delta = Transform3D.IDENTITY
 		_motion_delta_time = 0.0
 		return
-	if orbit_pivot and orbit_speed != 0.0:
+	if is_rogue:
+		_process_rogue(delta)
+	elif orbit_pivot and orbit_speed != 0.0:
 		_orbit_angle += orbit_speed * delta
 		_update_orbit_position()
 		_check_boundary()
@@ -594,6 +623,131 @@ func _update_orbit_position() -> void:
 	var b: float = _semi_minor if _semi_minor > 0.0 else orbit_radius
 	var offset := (tangent_a * cos(_orbit_angle) * a + tangent_b * sin(_orbit_angle) * b)
 	global_position = orbit_pivot.global_position + offset
+
+## The moon/fragment we were orbiting just shattered - go rogue instead of
+## sitting on a now-invalid pivot (_update_orbit_position would otherwise
+## start reading a freed/garbage node next frame).
+func _on_orbit_pivot_shattered(_pivot: OrbitalBody) -> void:
+	if is_shattered or is_rogue:
+		return
+	go_rogue()
+
+## Leaves the analytic orbit formula behind and starts flying free: keeps
+## whatever velocity the orbit was actually carrying at this instant (so the
+## body continues in a straight line from where it was, tangent to the old
+## orbit, rather than teleporting to a stop), then falls under everyone
+## else's real gravity from here on (_process_rogue) until either recaptured
+## into a new stable orbit or shattered by drifting past the arena boundary.
+func go_rogue() -> void:
+	if is_shattered:
+		return
+	is_rogue = true
+	_rogue_capture_progress = 0.0
+	_rogue_velocity = get_point_velocity(global_position)
+	if _rogue_velocity.length_squared() < 0.0001:
+		# No motion_delta history yet (e.g. this body has never had a physics
+		# frame tick) - fall back to the orbit formula's own closed-form
+		# tangent instead of leaving it dead in space.
+		_rogue_velocity = _orbit_tangent_velocity()
+	orbit_pivot = null
+
+## d/dt of _update_orbit_position()'s own ellipse parametrization - the exact
+## tangential velocity the analytic orbit was producing the instant before
+## go_rogue() stops calling it.
+func _orbit_tangent_velocity() -> Vector3:
+	if orbit_pivot == null:
+		return Vector3.ZERO
+	var axis := orbit_axis.normalized()
+	var reference := Vector3.RIGHT if abs(axis.dot(Vector3.RIGHT)) < 0.9 else Vector3.FORWARD
+	var tangent_a := axis.cross(reference).normalized()
+	var tangent_b := axis.cross(tangent_a).normalized()
+	var a: float = orbit_radius
+	var b: float = _semi_minor if _semi_minor > 0.0 else orbit_radius
+	return (-tangent_a * sin(_orbit_angle) * a + tangent_b * cos(_orbit_angle) * b) * orbit_speed
+
+## Straight line plus real multi-body gravity - the actual physics this whole
+## project otherwise fakes with the analytic orbit formula - until either
+## recaptured (_update_rogue_capture) or ejected past the boundary.
+func _process_rogue(delta: float) -> void:
+	_rogue_velocity += GravityManager.get_gravity_at(global_position) * rogue_gravity_multiplier * delta
+	global_position += _rogue_velocity * delta
+	_check_boundary()
+	if not is_shattered:
+		_update_rogue_capture(delta)
+
+## Nearest body a rogue is close enough to plausibly settle around - unlike
+## _pick_fragment_host (used for a fresh shatter, which can reach clear
+## across the arena for a home), this only ever considers bodies the rogue
+## is already inside the influence radius of, and skips anything much
+## smaller than itself (a rogue shouldn't end up "orbiting" a pebble).
+func _find_capture_host() -> OrbitalBody:
+	var best: OrbitalBody = null
+	var best_dist: float = INF
+	for body in GravityManager.get_bodies():
+		if body == self or not is_instance_valid(body) or body.is_shattered:
+			continue
+		if body.radius < radius * 0.6:
+			continue
+		var dist: float = body.global_position.distance_to(global_position)
+		if dist > body.influence_radius:
+			continue
+		if dist < best_dist:
+			best_dist = dist
+			best = body
+	return best
+
+## "Excessively trends towards being pulled into a stable orbit around a new
+## planet" per design: once a candidate host is in range, ramps up (over
+## rogue_capture_time of sustained proximity) how strongly velocity is pulled
+## toward the tangential speed a circular orbit at the current distance would
+## have, rather than snapping onto one instantly. Reaching full strength
+## actually commits to the new orbit via _capture_into_orbit().
+func _update_rogue_capture(delta: float) -> void:
+	var host: OrbitalBody = _find_capture_host()
+	if host == null:
+		_rogue_capture_progress = maxf(_rogue_capture_progress - delta / rogue_capture_time, 0.0)
+		return
+	_rogue_capture_progress = clampf(_rogue_capture_progress + delta / rogue_capture_time, 0.0, 1.0)
+
+	var to_host: Vector3 = host.global_position - global_position
+	var dist: float = maxf(to_host.length(), 0.01)
+	var axis: Vector3 = orbit_axis.normalized()
+	var radial_dir: Vector3 = to_host / dist
+	var tangent_dir: Vector3 = axis.cross(radial_dir)
+	if tangent_dir.length_squared() < 0.0001:
+		tangent_dir = Vector3.RIGHT.cross(radial_dir)
+	tangent_dir = tangent_dir.normalized() if tangent_dir.length_squared() > 0.0001 else Vector3.RIGHT
+	# Circular-orbit speed at this distance for host's own surface_gravity,
+	# same v = sqrt(g_surface * r_surface^2 / r) shape Player.gd's jump uses
+	# for "how hard does this body actually pull", scaled down since these
+	# orbits are meant to be slow drifts (see ORBIT_DATA's own orbit_speed
+	# values), not a literal escape-velocity orbit.
+	var ideal_speed: float = sqrt(maxf(host.surface_gravity, 0.1) * host.radius * host.radius / dist) * 0.12
+	var ideal_velocity: Vector3 = tangent_dir * ideal_speed + host.get_point_velocity(global_position)
+
+	# Pull strength itself ramps with _rogue_capture_progress - "excessively"
+	# trends toward it, not an immediate snap.
+	var pull: float = clampf(_rogue_capture_progress * delta * 2.0, 0.0, 1.0)
+	_rogue_velocity = _rogue_velocity.lerp(ideal_velocity, pull)
+
+	if _rogue_capture_progress >= 1.0:
+		_capture_into_orbit(host, to_host)
+
+## Commits a fully-captured rogue back onto the analytic orbit formula around
+## `host`, phased so the body doesn't jump to a different point on the new
+## circle the instant orbit_pivot starts driving its position again.
+func _capture_into_orbit(host: OrbitalBody, to_host: Vector3) -> void:
+	is_rogue = false
+	orbit_radius = clampf(to_host.length(), host.radius * 1.8, host.influence_radius * 1.4)
+	orbit_speed = (1.0 if orbit_speed >= 0.0 else -1.0) * randf_range(0.08, 0.2)
+	orbit_eccentricity = 0.0
+	_semi_minor = orbit_radius
+	var axis := orbit_axis.normalized()
+	var reference := Vector3.RIGHT if abs(axis.dot(Vector3.RIGHT)) < 0.9 else Vector3.FORWARD
+	var tangent_a := axis.cross(reference).normalized()
+	var tangent_b := axis.cross(tangent_a).normalized()
+	_orbit_angle = atan2(-to_host.dot(tangent_b), -to_host.dot(tangent_a))
+	orbit_pivot = host
 
 func _check_boundary() -> void:
 	if global_position.length() <= GravityManager.ARENA_BOUNDARY_RADIUS:
@@ -724,6 +878,14 @@ func shatter(blast_radius: float, blast_damage: float, instigator: Node = null, 
 	static_body.set_collision_mask_value(1, false)
 	mesh.visible = false
 	_spawn_debris()
+	# Counted locally rather than inferred from MatchState.player_fragged
+	# afterward - a victim whose authority is this peer dies synchronously
+	# inside apply_damage() (Player._die() sets is_dead before returning), so
+	# a before/after check here catches it directly. A victim owned by
+	# another peer is only ever told over RPC (see the network_apply_damage
+	# branch below) and its death isn't observable from here - same
+	# per-peer visibility limit MatchState's own frag tracking already has.
+	var kill_count: int = 0
 	for node in get_tree().get_nodes_in_group("damageable"):
 		if not is_instance_valid(node) or node == instigator:
 			continue
@@ -735,7 +897,12 @@ func shatter(blast_radius: float, blast_damage: float, instigator: Node = null, 
 				if node.has_method("network_apply_damage") and not node.is_multiplayer_authority():
 					node.rpc_id(node.get_multiplayer_authority(), "network_apply_damage", dmg, instigator.get_path() if instigator else NodePath(), global_position, weapon_name)
 				else:
+					var was_dead: bool = "is_dead" in node and node.is_dead
 					node.apply_damage(dmg, instigator, global_position, weapon_name)
+					if "is_dead" in node and node.is_dead and not was_dead:
+						kill_count += 1
+	if kill_count > 0 and weapon_name == "Planet Buster" and instigator and "player_id" in instigator:
+		BountyManager.report_planet_kill(instigator.player_id, kill_count)
 	_spawn_moon_fragments()
 	await get_tree().create_timer(4.0).timeout
 	GravityManager.unregister_body(self)

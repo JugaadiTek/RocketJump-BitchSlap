@@ -1,0 +1,27 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/weapons/BramblesLauncher.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/weapons/BramblesGrenade.tscn" id="2"]
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_barrel"]
+top_radius = 0.09
+bottom_radius = 0.12
+height = 0.3
+radial_segments = 8
+
+[sub_resource type="BoxMesh" id="BoxMesh_body"]
+size = Vector3(0.14, 0.16, 0.24)
+
+[node name="BramblesLauncher" type="Node3D"]
+script = ExtResource("1")
+grenade_scene = ExtResource("2")
+
+[node name="ViewModel" type="Node3D" parent="."]
+
+[node name="Barrel" type="MeshInstance3D" parent="ViewModel"]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, -0.05, -0.3)
+mesh = SubResource("CylinderMesh_barrel")
+
+[node name="Body" type="MeshInstance3D" parent="ViewModel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.08, -0.05)
+mesh = SubResource("BoxMesh_body")

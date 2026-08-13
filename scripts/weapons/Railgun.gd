@@ -18,15 +18,16 @@ extends Weapon
 @export var min_damage: float = 20.0          ## damage when fired at min charge
 @export var max_damage: float = 200.0         ## damage at full charge
 @export var min_charge_time: float = 0.3      ## seconds before shot is "valid" at all
-@export var charge_max_time: float = 1.8      ## seconds to reach max_damage
+@export var charge_max_time: float = 0.9      ## seconds to reach max_damage (halved from 1.8)
 @export var charge_falloff: float = 0.6       ## charge drains this fast per second after release without firing
 
 @export_group("Scope")
 @export var scope_fov: float = 18.0
 ## Fraction of hipfire mouse sensitivity kept while scoped - panning is still
 ## much slower than hipfire (a narrow FOV makes raw sensitivity feel frantic),
-## but this is 30% faster than it used to be (0.18 -> 0.234).
-@export var scope_sensitivity_multiplier: float = 0.18 * 1.3
+## but this is faster than it used to be (0.18 -> 0.234 -> 0.39, so aim
+## movement while scoped keeps pace with the halved charge time below).
+@export var scope_sensitivity_multiplier: float = 0.3 * 1.3
 @export var scope_transition_speed: float = 14.0
 ## How far in front of the eye the lens sits once scoped. The viewmodel slides
 ## so the scope tube lands on the camera axis, which is what makes it read as
@@ -140,6 +141,7 @@ func _do_fire(_muzzle_transform: Transform3D, _aim_direction: Vector3) -> void:
 func _do_fire_with_damage(muzzle_transform: Transform3D, aim_direction: Vector3, shot_damage: float, valid: bool) -> void:
 	var space_state := get_world_3d().direct_space_state
 	var from: Vector3 = muzzle_transform.origin
+	aim_direction = _apply_aim_assist(from, aim_direction, max_range)
 	var to: Vector3 = from + aim_direction * max_range
 	var query := PhysicsRayQueryParameters3D.create(from, to)
 	query.collision_mask = 1 | 2 | 8

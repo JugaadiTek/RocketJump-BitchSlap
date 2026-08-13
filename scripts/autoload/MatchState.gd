@@ -27,6 +27,12 @@ var _scores_dirty: bool = true
 ## Lives here because it has to survive the scene change into the Arena.
 var start_with_all_weapons: bool = false
 
+## Aim assist, set from the main menu. Session-only (no disk persistence) -
+## strength is 0..1, applied by Weapon._apply_aim_assist() to the local
+## human's own shots only (bots already aim precisely).
+var aim_assist_enabled: bool = true
+var aim_assist_strength: float = 0.5
+
 func register_spawn_point(point: Node3D) -> void:
 	if not spawn_points.has(point):
 		spawn_points.append(point)
@@ -56,6 +62,17 @@ func report_frag(victim_id: int, killer_id: int, weapon_name: String) -> void:
 		_scores_dirty = true
 		score_changed.emit(killer_id, scores[killer_id])
 	player_fragged.emit(victim_id, killer_id, weapon_name)
+
+## Score awarded outside the normal one-point-per-frag flow (bounty payouts,
+## Planet Killer's 2x-kill bonus) - same score/_scores_dirty bookkeeping as
+## report_frag(), just without the frag itself (BountyManager reacts to
+## player_fragged for its own logic, it doesn't need another one emitted here).
+func add_bonus_score(player_id: int, amount: int) -> void:
+	if amount == 0:
+		return
+	scores[player_id] = scores.get(player_id, 0) + amount
+	_scores_dirty = true
+	score_changed.emit(player_id, scores[player_id])
 
 func get_score(player_id: int) -> int:
 	return scores.get(player_id, 0)

@@ -9,6 +9,8 @@ const ARENA_SCENE_PATH: String = "res://scenes/world/Arena.tscn"
 @onready var join_button: Button = $CenterContainer/VBoxContainer/JoinRow/JoinButton
 @onready var offline_button: Button = $CenterContainer/VBoxContainer/OfflineButton
 @onready var all_weapons_check: CheckBox = $CenterContainer/VBoxContainer/AllWeaponsCheck
+@onready var aim_assist_check: CheckBox = $CenterContainer/VBoxContainer/AimAssistCheck
+@onready var aim_assist_slider: HSlider = $CenterContainer/VBoxContainer/AimAssistRow/AimAssistSlider
 
 func _ready() -> void:
 	host_button.pressed.connect(_on_host_pressed)
@@ -18,12 +20,17 @@ func _ready() -> void:
 	NetworkManager.connection_failed.connect(_on_connection_failed)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	all_weapons_check.button_pressed = MatchState.start_with_all_weapons
+	aim_assist_check.button_pressed = MatchState.aim_assist_enabled
+	aim_assist_slider.value = MatchState.aim_assist_strength
 
 ## Stashed on MatchState rather than passed along, because every entry point
-## below leaves this scene behind - the flag has to outlive it.
+## below leaves this scene behind - the flag has to outlive it. Session-only
+## (not saved to disk) - resets to the default every relaunch.
 func _apply_options() -> void:
 	Sfx.play_ui("ui_click")
 	MatchState.start_with_all_weapons = all_weapons_check.button_pressed
+	MatchState.aim_assist_enabled = aim_assist_check.button_pressed
+	MatchState.aim_assist_strength = aim_assist_slider.value
 
 func _get_port() -> int:
 	var value: int = port_field.text.to_int()

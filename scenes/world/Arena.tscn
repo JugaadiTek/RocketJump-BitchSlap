@@ -1,4 +1,4 @@
-[gd_scene load_steps=16 format=3]
+[gd_scene load_steps=19 format=3]
 
 [ext_resource type="Script" path="res://scripts/world/Arena.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/world/OrbitalBody.tscn" id="2"]
@@ -14,6 +14,9 @@
 [ext_resource type="PackedScene" path="res://scenes/world/Turret.tscn" id="12"]
 [ext_resource type="Script" path="res://scripts/world/GunshipDirector.gd" id="13"]
 [ext_resource type="PackedScene" path="res://scenes/world/Gunship.tscn" id="14"]
+[ext_resource type="PackedScene" path="res://scenes/weapons/BlackHoleGunPickup.tscn" id="15"]
+[ext_resource type="PackedScene" path="res://scenes/weapons/BramblesLauncherPickup.tscn" id="16"]
+[ext_resource type="PackedScene" path="res://scenes/world/SkyScoreboard.tscn" id="17"]
 
 [node name="Arena" type="Node3D"]
 script = ExtResource("1")
@@ -22,6 +25,8 @@ player_scene = ExtResource("3")
 bot_scene = ExtResource("4")
 bot_count = 31
 planet_buster_pickup_scene = ExtResource("5")
+black_hole_gun_pickup_scene = ExtResource("15")
+brambles_launcher_pickup_scene = ExtResource("16")
 jump_pad_scene = ExtResource("7")
 tower_scene = ExtResource("9")
 bunker_scene = ExtResource("10")
@@ -39,6 +44,9 @@ shadow_enabled = true
 [node name="ArenaBoundary" parent="." instance=ExtResource("8")]
 
 [node name="OrbitCenter" type="Marker3D" parent="."]
+
+[node name="SkyScoreboard" parent="." instance=ExtResource("17")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 900, 0)
 
 [node name="OrbitalBodies" type="Node3D" parent="."]
 

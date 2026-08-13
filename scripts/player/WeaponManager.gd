@@ -10,6 +10,8 @@ extends Node3D
 @export var planet_buster_scene: PackedScene
 @export var space_board_scene: PackedScene
 @export var grappling_hook_scene: PackedScene
+@export var black_hole_gun_scene: PackedScene
+@export var brambles_launcher_scene: PackedScene
 
 var _weapons: Array[Weapon] = []
 var _current_index: int = 0
@@ -30,6 +32,8 @@ func _ready() -> void:
 	# up front instead of making someone find a pad first.
 	if MatchState.start_with_all_weapons:
 		grant_weapon("planetbuster")
+		grant_weapon("blackholegun")
+		grant_weapon("brambleslauncher")
 		_current_index = 0
 	_update_visibility()
 
@@ -91,6 +95,10 @@ func grant_weapon(id: String) -> void:
 	match id:
 		"planetbuster":
 			scene = planet_buster_scene
+		"blackholegun":
+			scene = black_hole_gun_scene
+		"brambleslauncher":
+			scene = brambles_launcher_scene
 	if scene == null:
 		return
 	var weapon: Weapon = scene.instantiate()

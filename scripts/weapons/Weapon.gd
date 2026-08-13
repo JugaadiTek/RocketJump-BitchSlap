@@ -17,6 +17,10 @@ signal fired
 ## the HUD to color-code the weapon list. Set per-subclass in `_init()`.
 @export var weapon_color: Color = Color.WHITE
 
+## Half-angle of the cone (around the raw aim direction) aim assist searches
+## for a target in, before nudging aim_direction toward it.
+@export var aim_assist_cone_degrees: float = 6.0
+
 var owner_player: Node = null
 var _cooldown_remaining: float = 0.0
 
@@ -74,6 +78,40 @@ func overrides_aim_fov() -> bool:
 ## to unwind it here (see GrapplingHook).
 func on_holster() -> void:
 	pass # override
+
+## Nudges `aim_direction` toward the nearest "damageable" target within
+## `aim_assist_cone_degrees` of it, scaled by MatchState.aim_assist_strength.
+## Only affects the local human's own shots - bots already aim precisely, and
+## other peers' fire isn't ours to nudge (each peer only ever calls this for
+## its own weapon instance's shots). Subclasses call this just before using
+## aim_direction to raycast/launch a projectile.
+func _apply_aim_assist(from: Vector3, aim_direction: Vector3, max_range: float = 400.0) -> Vector3:
+	if not MatchState.aim_assist_enabled or MatchState.aim_assist_strength <= 0.0:
+		return aim_direction
+	var p: Node = owner_player
+	if p == null or not p.has_method("is_multiplayer_authority") or not p.is_multiplayer_authority():
+		return aim_direction
+	if p.has_method("_is_local_view") and not p._is_local_view():
+		return aim_direction
+	var best: Node3D = null
+	var best_angle: float = deg_to_rad(aim_assist_cone_degrees)
+	for node in get_tree().get_nodes_in_group("damageable"):
+		if node == owner_player or not is_instance_valid(node):
+			continue
+		if "is_dead" in node and node.is_dead:
+			continue
+		var to_node: Vector3 = node.global_position - from
+		var dist: float = to_node.length()
+		if dist < 0.01 or dist > max_range:
+			continue
+		var angle: float = aim_direction.angle_to(to_node.normalized())
+		if angle < best_angle:
+			best_angle = angle
+			best = node
+	if best == null:
+		return aim_direction
+	var to_best: Vector3 = (best.global_position - from).normalized()
+	return aim_direction.slerp(to_best, MatchState.aim_assist_strength).normalized()
 
 ## Finds (or lazily creates) the shared container new projectiles get parented
 ## under, so they don't end up nested inside the firing player (which would

@@ -179,6 +179,10 @@ func _ready() -> void:
 			weapon_manager.visible = false
 	if is_multiplayer_authority():
 		_start_spawn_sequence()
+	_setup_bounty_visuals()
+
+func _process(_delta: float) -> void:
+	_update_bounty_visuals()
 
 ## True for the human-controlled local view; Bot overrides this to false. Not
 ## to be confused with is_multiplayer_authority(), which controls whether
@@ -276,6 +280,7 @@ func _physics_process(delta: float) -> void:
 		# null while airborne/in space, so leaving the surface clears it).
 		hud.update_planet_threat_warning(_frame_body != null and is_instance_valid(_frame_body) and _frame_body.is_under_threat())
 		hud.update_gunship_target(_aimed_gunship())
+		hud.update_bounty_panel(BountyManager.get_sorted_bounties())
 
 ## ---- Gunship driver seat --------------------------------------------------
 
@@ -567,6 +572,27 @@ func _apply_look(_delta: float) -> void:
 	var pitch_limit: float = deg_to_rad(pitch_limit_degrees)
 	head.rotation.x = clamp(head.rotation.x - look.y * sensitivity, -pitch_limit, pitch_limit)
 
+## ---- Bramble patch (Brambles Cannister Grenade Launcher) ------------------
+## Stack-counted rather than a plain bool so overlapping patches don't let
+## exiting one prematurely restore full speed while still standing in another.
+var speed_multiplier: float = 1.0
+var _bramble_stack: int = 0
+
+func enter_brambles() -> void:
+	_bramble_stack += 1
+	speed_multiplier = 0.5
+
+func exit_brambles() -> void:
+	_bramble_stack = maxi(_bramble_stack - 1, 0)
+	if _bramble_stack == 0:
+		speed_multiplier = 1.0
+
+## Purely local rendering, same reasoning as set_highlighted() - only the
+## human actually standing in the brambles has their own view obscured.
+func show_bramble_vision(active: bool) -> void:
+	if hud:
+		hud.update_bramble_vision(active)
+
 func _apply_movement(up: Vector3, delta: float) -> void:
 	var forward: Vector3 = -global_transform.basis.z
 	var right: Vector3 = global_transform.basis.x
@@ -603,7 +629,7 @@ func _apply_movement(up: Vector3, delta: float) -> void:
 
 	if is_on_floor():
 		vel_horizontal = _apply_friction(vel_horizontal, ground_friction, delta)
-		vel_horizontal = _q3_accelerate(wish_dir, max_ground_speed, ground_accel, vel_horizontal, delta)
+		vel_horizontal = _q3_accelerate(wish_dir, max_ground_speed * speed_multiplier, ground_accel, vel_horizontal, delta)
 		if _wants_jump():
 			var g_mag: float = max(current_gravity.length(), 4.0)
 			vel_up = sqrt(2.0 * g_mag * jump_height)
@@ -614,7 +640,7 @@ func _apply_movement(up: Vector3, delta: float) -> void:
 			# collision response; without this it accumulates into a hop.
 			vel_up = min(vel_up, 0.0)
 	else:
-		vel_horizontal = _q3_air_accelerate(wish_dir, max_ground_speed, air_accel, air_speed_cap, vel_horizontal, delta)
+		vel_horizontal = _q3_air_accelerate(wish_dir, max_ground_speed * speed_multiplier, air_accel, air_speed_cap, vel_horizontal, delta)
 
 	vel_up += current_gravity.dot(up) * delta
 	velocity = vel_horizontal + up * vel_up
@@ -937,6 +963,63 @@ func set_highlighted(active: bool) -> void:
 			if is_instance_valid(mesh_inst):
 				mesh_inst.material_override = _highlight_saved_materials[mesh_inst]
 		_highlight_saved_materials.clear()
+
+## ---- Bounty nametag / glow -------------------------------------------------
+## Every peer renders this for every Player it knows about (unlike
+## set_highlighted, which is a purely local rendering decision only the
+## scoping human sees) - a bounty is a fact about the player, not the viewer.
+
+const BOUNTY_GLOW_COLOR: Color = Color(1.0, 0.82, 0.2)
+
+var _nametag: Label3D = null
+var _bounty_glow: OmniLight3D = null
+var _bounty_glow_active: bool = false
+
+func _setup_bounty_visuals() -> void:
+	_nametag = Label3D.new()
+	_nametag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_nametag.no_depth_test = true
+	_nametag.fixed_size = true
+	_nametag.pixel_size = 0.01
+	_nametag.font_size = 44
+	_nametag.outline_size = 10
+	_nametag.position = Vector3(0.0, 2.3, 0.0)
+	_nametag.visible = false
+	add_child(_nametag)
+
+	_bounty_glow = OmniLight3D.new()
+	_bounty_glow.light_color = BOUNTY_GLOW_COLOR
+	_bounty_glow.light_energy = 3.5
+	_bounty_glow.omni_range = 14.0
+	_bounty_glow.shadow_enabled = false
+	_bounty_glow.position = Vector3(0.0, 1.0, 0.0)
+	_bounty_glow.visible = false
+	add_child(_bounty_glow)
+
+## Nametag: hidden entirely in the local human's own first-person view (same
+## convention as every other third-person-only body attachment), hidden while
+## dead, otherwise always shows the display name; a bounty value/suffix are
+## appended only while BountyManager actually has one on this player.
+func _update_bounty_visuals() -> void:
+	if _nametag == null or is_dead or is_first_person_view():
+		if _nametag:
+			_nametag.visible = false
+		if _bounty_glow:
+			_bounty_glow.visible = false
+		return
+
+	var value: int = BountyManager.get_display_value(player_id)
+	var text: String = display_name
+	if value > 0:
+		text += "  [%d]%s" % [value, BountyManager.get_nametag_suffix(player_id)]
+	_nametag.text = text
+	_nametag.modulate = BOUNTY_GLOW_COLOR if value > 0 else Color.WHITE
+	_nametag.visible = true
+
+	var glow: bool = value > 0
+	if glow != _bounty_glow_active:
+		_bounty_glow_active = glow
+		_bounty_glow.visible = glow
 
 func _model_meshes() -> Array[MeshInstance3D]:
 	var out: Array[MeshInstance3D] = []
